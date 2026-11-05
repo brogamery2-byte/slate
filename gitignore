@@ -1,0 +1,13 @@
+# Private keys: NEVER commit these
+*.key.pem
+*.key
+*.pem
+!*.pub.pem
+
+# Build output
+build/
+dist/
+*.zip
+
+# OS junk
+.DS_Store
