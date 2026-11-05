@@ -1,7 +1,7 @@
 # Slate roadmap
 
 ## Phase 0: Access
-- [x] Request an organization at developer.emexlabs.org (reverse-DNS id)
+- [ ] Request an organization at developer.emexlabs.org (reverse-DNS id)
 - [ ] Get `RomGen.py` and generate a keypair (`genkey`)
 - [ ] Store the private key somewhere safe, outside this repo
 
@@ -11,7 +11,7 @@
 - [x] Write findings into `docs/format.md`
 
 ## Phase 2: Minimal ROM
-- [ ] Write a `manifest.plist` for Slate (own identifier, version 1, security 1)
+- [x] Write a `manifest.plist` for Slate (own identifier, version 1, security 1)
 - [ ] Tiny `System/Rom/init` and `uninstall`
 - [ ] Smallest ROM that flashes and boots
 - [ ] Custom boot screen
