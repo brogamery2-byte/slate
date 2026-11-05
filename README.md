@@ -19,7 +19,7 @@ my attempt at building one.
 
 ## Project layout
 
-Folders get added as the ROM takes shape. See [ROADMAP.md](ROADMAP.md).
+Folders get added as the ROM takes shape. See [ROADMAP.md](ROADMAP.md) and [docs/format.md](docs/format.md).
 
 ## Signing and security
 
