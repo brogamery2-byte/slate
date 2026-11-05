@@ -1,0 +1,55 @@
+name: Build Slate ROM
+
+# Run it by hand: Actions tab > Build Slate ROM > Run workflow.
+# Needs one repository secret: ROM_SIGNING_KEY (the full text of slate.key.pem).
+# Keep this repo PRIVATE: anyone who can edit workflows can read that secret.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # RomGen's Makefile uses xcrun and the iOS SDK, so it needs a Mac.
+    runs-on: macos-latest
+    steps:
+      - name: Check out Nyxian (with submodules)
+        uses: actions/checkout@v4
+        with:
+          repository: emexlab/Nyxian
+          submodules: recursive
+          path: nyxian
+
+      - name: Write the signing key
+        env:
+          ROM_KEY: ${{ secrets.ROM_SIGNING_KEY }}
+        run: |
+          mkdir -p ~/.config/nyxian/romkey
+          printf '%s\n' "$ROM_KEY" > ~/.config/nyxian/romkey/slate.key.pem
+          chmod 600 ~/.config/nyxian/romkey/slate.key.pem
+
+      - name: Generate the ROM template
+        run: |
+          ROMGEN=$(find nyxian -name RomGen.py | head -n 1)
+          echo "Using $ROMGEN"
+          python3 "$ROMGEN" generate nyxian slate-build \
+            --identifier dev.alloycore.slate \
+            --name Slate \
+            --key ~/.config/nyxian/romkey/slate.key.pem
+
+      - name: Build and sign
+        run: |
+          cd slate-build
+          make
+
+      - name: Check the signature
+        # Fails to match the TrustStore until emexLabs approves your key; that is expected.
+        run: python3 slate-build/RomGen.py verify slate-build/rom.zip --truststore online || true
+
+      - name: Upload the ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: Slate-ROM
+          path: slate-build/rom.zip
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.config/nyxian/romkey/slate.key.pem
