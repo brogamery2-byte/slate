@@ -5,9 +5,8 @@
 	<key>NXRomManifestVersion</key>
 	<integer>1</integer>
 
-	<!-- TODO: replace with the organization id emexLabs approves for you -->
 	<key>NXRomIdentifier</key>
-	<string>com.yourorg.slate</string>
+	<string>dev.alloycore.slate</string>
 
 	<key>NXRomName</key>
 	<string>Slate</string>
@@ -15,13 +14,13 @@
 	<key>NXRomVersion</key>
 	<string>0.1.0</string>
 
-	<!-- Only ever goes up. Bump it when you ship a security fix. -->
+	<!-- Bump when a security fix gets shipped! -->
 	<key>NXRomSecurityVersion</key>
 	<integer>1</integer>
 
 	<!-- Copied from Switzach 1.0.5. Check the current minimum. -->
 	<key>NXRomMinimumNyxianVersion</key>
-	<string>0.11.6</string>
+	<string>0.11.6.1</string>
 
 	<!-- 420 = 0644, 493 = 0755 -->
 	<key>NXRomDefaultFilePermission</key>
