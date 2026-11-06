@@ -18,17 +18,6 @@ jobs:
           submodules: recursive
           path: nyxian
 
-      - name: Patch missing size_t include
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          header = Path("nyxian/rom/src/LindChain/ProcEnvironment/Surface/libkern/version.h")
-          text = header.read_text()
-          if "#include <stddef.h>" not in text:
-              header.write_text("#include <stddef.h>\n" + text)
-          PY
-
       - name: Write the signing key
         env:
           ROM_KEY: ${{ secrets.ROM_SIGNING_KEY }}
