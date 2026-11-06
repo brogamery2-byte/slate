@@ -20,7 +20,7 @@
 
 	<!-- Copied from Switzach 1.0.5. Check the current minimum. -->
 	<key>NXRomMinimumNyxianVersion</key>
-	<string>0.11.6.1</string>
+	<string>0.11.6.2</string>
 
 	<!-- 420 = 0644, 493 = 0755 -->
 	<key>NXRomDefaultFilePermission</key>
