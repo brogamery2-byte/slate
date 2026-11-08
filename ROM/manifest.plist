@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NXRomManifestVersion</key>
+    <integer>1</integer>
+
+    <key>NXRomIdentifier</key>
+    <string>dev.alloycore.slate</string>
+    <key>NXRomName</key>
+    <string>Slate</string>
+    <key>NXRomVersion</key>
+    <string>1.0</string>
+
+    <key>NXRomSecurityVersion</key>
+    <integer>1</integer>
+    <key>NXRomMinimumNyxianVersion</key>
+    <string>0.12.1</string>
+
+    <key>NXRomDefaultFilePermission</key>
+    <integer>420</integer>
+    <key>NXRomDefaultDirectoryPermission</key>
+    <integer>493</integer>
+
+    <key>NXRomPaths</key>
+    <array>
+
+        <dict>
+            <key>NXPath</key>
+            <string>main</string>
+            <key>NXPermission</key>
+            <integer>365</integer>
+            <key>NXRequiresCodeSigning</key>
+            <true/>
+        </dict>
+
+        <dict>
+            <key>NXPath</key>
+            <string>Application/Hello.app/Hello</string>
+            <key>NXPermission</key>
+            <integer>365</integer>
+            <key>NXRequiresCodeSigning</key>
+            <true/>
+            <key>NXT2Entitlements</key>
+            <dict>
+                <key>org.emexlabs.nyxian.platform</key>
+                <true/>
+                <key>org.emexlabs.nyxian.platform.user</key>
+                <integer>501</integer>
+                <key>org.emexlabs.nyxian.platform.group</key>
+                <integer>501</integer>
+                <key>org.emexlabs.nyxian.get-task-allow</key>
+                <false/>
+            </dict>
+        </dict>
+    </array>
+
+    <key>NXRomExecutable</key>
+    <string>main</string>
+</dict>
+</plist>
