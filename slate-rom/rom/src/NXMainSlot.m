@@ -38,6 +38,14 @@ static NSString *NXROMDisplayName(void)
     return ([name isKindOfClass:NSString.class] && name.length > 0) ? name : @"ROM";
 }
 
+static NSString *NXROMVersionString(void)
+{
+    NSString *slot = NXROMSlotDirectory();
+    NSDictionary *manifest = slot ? [NSDictionary dictionaryWithContentsOfFile:[slot stringByAppendingPathComponent:@"manifest.plist"]] : nil;
+    NSString *version = manifest[@"NXRomVersion"];
+    return [version isKindOfClass:NSString.class] ? version : @"?";
+}
+
 @interface NXROMApplication : NSObject
 @property (nonatomic, strong) NSBundle *bundle;
 @property (nonatomic, copy) NSString *bundleIdentifier;
@@ -534,6 +542,7 @@ static NSString *NXROMSignalProcess(pid_t pid, int sig)
 {
     [super viewDidLoad];
     self.title = NXROMDisplayName();
+    self.tableView.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:1.0];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"application"];
 
@@ -625,12 +634,12 @@ static NSString *NXROMSignalProcess(pid_t pid, int sig)
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-    return @"Applications";
+    return @"Apps";
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
-    return self.applications.count == 0 ? @"This ROM ships no apps (Application/*.app)." : nil;
+    return self.applications.count == 0 ? @"This ROM ships no apps (Application/*.app)." : [NSString stringWithFormat:@"Slate %@", NXROMVersionString()];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -641,8 +650,7 @@ static NSString *NXROMSignalProcess(pid_t pid, int sig)
 
     UIListContentConfiguration *content = [UIListContentConfiguration subtitleCellConfiguration];
     content.text = application.name;
-    content.secondaryText = process ? [NSString stringWithFormat:@"%@ · running, pid %d", application.bundleIdentifier, process.pid]
-                                    : application.bundleIdentifier;
+    content.secondaryText = process ? @"Running" : @"Tap to open";
     content.secondaryTextProperties.color = UIColor.secondaryLabelColor;
     content.image = application.icon ?: [UIImage systemImageNamed:@"app.dashed"];
     content.imageProperties.maximumSize = CGSizeMake(40.0, 40.0);
@@ -687,6 +695,8 @@ UIViewController *NXMainSlot(void)
 
     UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:[NXROMApplicationsViewController new]];
     navigation.navigationBar.prefersLargeTitles = YES;
+    navigation.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    navigation.view.tintColor = [UIColor colorWithRed:0.45 green:0.62 blue:0.95 alpha:1.0];
     return navigation;
 }
 
