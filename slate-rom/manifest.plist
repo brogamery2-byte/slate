@@ -15,7 +15,7 @@
     <key>NXRomSecurityVersion</key>
     <integer>1</integer>
     <key>NXRomMinimumNyxianVersion</key>
-    <string>0.12.1</string>
+    <string>0.12.0</string>
 
     <key>NXRomDefaultFilePermission</key>
     <integer>420</integer>
