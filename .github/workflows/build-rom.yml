@@ -1,15 +1,27 @@
-name: Build Slate ROM
+name: Build Slate Dev ROM
 
-# Run it by hand: Actions tab > Build Slate ROM > Run workflow.
-# Needs one repository secret: ROM_SIGNING_KEY (the full text of slate.key.pem).
-# Keep this repo PRIVATE: anyone who can edit workflows can read that secret.
+# Manual only: Actions tab > Build Slate Dev ROM > Run workflow.
+# Secret needed: ROM_SIGNING_KEY = full text of the DEV private key (slatedev.key.pem).
+# Never print the key or turn on shell tracing (set -x) in this file: the repo is public.
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "ROM version (blank = 0.1.<run number>)"
+        required: false
+      security_version:
+        description: "Security version, must only go up (blank = run number)"
+        required: false
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'
     # RomGen's Makefile uses xcrun and the iOS SDK, so it needs a Mac.
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - name: Check out Nyxian (with submodules)
         uses: actions/checkout@v4
@@ -18,38 +30,56 @@ jobs:
           submodules: recursive
           path: nyxian
 
-      - name: Write the signing key
+      - name: Write the dev signing key
         env:
           ROM_KEY: ${{ secrets.ROM_SIGNING_KEY }}
         run: |
           mkdir -p ~/.config/nyxian/romkey
-          printf '%s\n' "$ROM_KEY" > ~/.config/nyxian/romkey/slate.key.pem
-          chmod 600 ~/.config/nyxian/romkey/slate.key.pem
+          printf '%s\n' "$ROM_KEY" > ~/.config/nyxian/romkey/slatedev.key.pem
+          chmod 600 ~/.config/nyxian/romkey/slatedev.key.pem
 
       - name: Generate the ROM template
         run: |
           ROMGEN=$(find nyxian -name RomGen.py | head -n 1)
           echo "Using $ROMGEN"
           python3 "$ROMGEN" generate nyxian slate-build \
-            --identifier dev.alloycore.slate \
-            --name Slate \
-            --key ~/.config/nyxian/romkey/slate.key.pem
+            --identifier dev.alloycore.slatedev \
+            --name "Slate Dev" \
+            --key ~/.config/nyxian/romkey/slatedev.key.pem
+
+      - name: Set version numbers
+        env:
+          ROM_VERSION: ${{ inputs.version || format('0.1.{0}', github.run_number) }}
+          ROM_SECURITY: ${{ inputs.security_version || github.run_number }}
+        run: |
+          python3 - << 'PY'
+          import os, plistlib
+          path = 'slate-build/manifest.plist'
+          with open(path, 'rb') as f:
+              manifest = plistlib.load(f)
+          manifest['NXRomVersion'] = os.environ['ROM_VERSION']
+          manifest['NXRomSecurityVersion'] = int(os.environ['ROM_SECURITY'])
+          with open(path, 'wb') as f:
+              plistlib.dump(manifest, f)
+          print('version', manifest['NXRomVersion'], 'security', manifest['NXRomSecurityVersion'])
+          PY
 
       - name: Build and sign
         run: |
           cd slate-build
           make
 
-      - name: Check the signature
-        # Fails to match the TrustStore until emexLabs approves your key; that is expected.
-        run: python3 slate-build/RomGen.py verify slate-build/rom.zip --truststore online || true
+      - name: Show the ROM details
+        run: |
+          python3 slate-build/RomGen.py info slate-build/rom.zip || true
+          shasum -a 256 slate-build/rom.zip
 
       - name: Upload the ROM
         uses: actions/upload-artifact@v4
         with:
-          name: Slate-ROM
+          name: Slate-Dev-ROM
           path: slate-build/rom.zip
 
       - name: Remove the key
         if: always()
-        run: rm -f ~/.config/nyxian/romkey/slate.key.pem
+        run: rm -f ~/.config/nyxian/romkey/slatedev.key.pem
