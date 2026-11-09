@@ -21,7 +21,7 @@
 - [x] Commit the generated template into this repo and build from it
 - [ ] Custom boot screen (`rom/src/NXBootGraphics.m`)
 - [ ] Replace the Hello app with Slate's own app (`appsrc/`)
-- [ ] Bump `NXRomSecurityVersion` for every release
+- [x] Bump `NXRomSecurityVersion` for every release
 
 ## Phase 4: Ship
 - [ ] `python3 RomGen.py verify rom.zip --truststore online`
