@@ -1,0 +1,44 @@
+/*
+ SPDX-License-Identifier: LicenseRef-EPSL-1.1
+
+ Copyright (C) 2025 - 2026 emexlab
+
+ This file is part of Nyxian.
+
+ Licensed under the emexLabs Public Source License, version 1.1
+ (EPSL 1.1).
+
+ Private use and modification are permitted under the license.
+ Redistribution of source or binaries, modified or unmodified,
+ requires prior written permission from emexLabs.
+
+ External deployment is subject to the source-availability
+ requirements and other conditions of the license.
+
+ Provided "AS IS", without warranty, to the extent permitted by law.
+
+ See LICENSE for the full license terms.
+*/
+
+#ifndef PELAUNCHSERVICEMANAGER_H
+#define PELAUNCHSERVICEMANAGER_H
+
+#import <Foundation/Foundation.h>
+#import <os/lock.h>
+#import <LindChain/ProcEnvironment/PELaunchService.h>
+
+@interface PELaunchServiceManager : NSObject
+
+- (instancetype)init;
++ (instancetype)shared;
+
+- (NSXPCConnection *)connectToService:(NSString *)serviceIdentifier protocol:(Protocol *)protocol observer:(id)observer observerProtocol:(Protocol *)observerProtocol;
+- (PELaunchService *)serviceForIdentifier:(NSString *)serviceIdentifier;
+
+- (void)invalidateAllEntries;
+- (void)reloadAllEntries;
+- (void)loadEntryWithFileName:(NSString*)entryName;
+
+@end
+
+#endif /* PELAUNCHSERVICEMANAGER_H */

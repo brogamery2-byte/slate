@@ -1,0 +1,46 @@
+/*
+ SPDX-License-Identifier: LicenseRef-EPSL-1.1
+
+ Copyright (C) 2025 - 2026 emexlab
+
+ This file is part of Nyxian.
+
+ Licensed under the emexLabs Public Source License, version 1.1
+ (EPSL 1.1).
+
+ Private use and modification are permitted under the license.
+ Redistribution of source or binaries, modified or unmodified,
+ requires prior written permission from emexLabs.
+
+ External deployment is subject to the source-availability
+ requirements and other conditions of the license.
+
+ Provided "AS IS", without warranty, to the extent permitted by law.
+
+ See LICENSE for the full license terms.
+*/
+
+#ifndef KSURFACE_FS_SANDBOX_H
+#define KSURFACE_FS_SANDBOX_H
+
+#include <CoreFoundation/CoreFoundation.h>
+#include <mach/mach.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <LindChain/ProcEnvironment/Surface/fs/preserver.h>
+
+typedef enum: UInt8 {
+    kFSMountPermissionNone      = 0,
+    kFSMountPermissionRead      = 1,
+    kFSMountPermissionReadWrite = 2,
+} FSMountPermissionFlags;
+
+kern_return_t ksurface_fs_sandbox_init(void);
+kern_return_t ksurface_fs_sandbox_registry_add(FSMountPermissionFlags permission, FSNodeType type, const char *mount_dir, const char *bind_dir, CFStringRef entitlementNeededRead, CFStringRef entitlementNeededWrite);
+kern_return_t ksurface_fs_sandbox_registry_remove(const char *path);
+
+CFArrayRef ksurface_fs_sandbox_copy_sandbox_extensions_for_entitlements(const char *path, FSMountPermissionFlags wanted, CFDictionaryRef entitlements);
+CFArrayRef ksurface_fs_sandbox_copy_sandbox_extensions(const char *path, FSMountPermissionFlags wanted);
+CFDataRef ksurface_fs_sandbox_copy_sandbox_extension_for_arbitary_path(const char *path, FSMountPermissionFlags wanted);
+
+#endif /* KSURFACE_FS_SANDBOX_H */

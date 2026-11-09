@@ -1,0 +1,41 @@
+/*
+ SPDX-License-Identifier: LicenseRef-EPSL-1.1
+
+ Copyright (C) 2025 - 2026 emexlab
+ Copyright (C) 2026 semvis123
+
+ This file is part of Nyxian.
+
+ Licensed under the emexLabs Public Source License, version 1.1
+ (EPSL 1.1).
+
+ Private use and modification are permitted under the license.
+ Redistribution of source or binaries, modified or unmodified,
+ requires prior written permission from emexLabs.
+
+ External deployment is subject to the source-availability
+ requirements and other conditions of the license.
+
+ Provided "AS IS", without warranty, to the extent permitted by law.
+
+ See LICENSE for the full license terms.
+*/
+
+#ifndef LIBKERN_SYS_SYSTM_H
+#define LIBKERN_SYS_SYSTM_H
+
+#include <mach/mach.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
+typedef void* userspace_pointer_t;
+typedef void* kernelspace_pointer_t;
+
+kern_return_t syscall_payload_create(void *ptr, size_t size, mach_vm_address_t *mach_vm_address);
+
+bool syscall_copy_in(task_t task, size_t size, kernelspace_pointer_t kptr, userspace_pointer_t src);
+kernelspace_pointer_t syscall_alloc_in(task_t task, size_t size, userspace_pointer_t src);
+bool syscall_copy_out(task_t task, size_t size, kernelspace_pointer_t kptr, userspace_pointer_t dst);
+char *syscall_copy_str_in(task_t task, userspace_pointer_t src, size_t len);
+
+#endif /* LIBKERN_SYS_SYSTM_H */
