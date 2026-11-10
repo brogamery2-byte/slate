@@ -850,7 +850,20 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
 
     UIListContentConfiguration *content = [UIListContentConfiguration subtitleCellConfiguration];
     content.text = application.name;
-    content.secondaryText = process ? @"Running" : @"Tap to open";
+    BOOL showDetails = NXROMDefaultBool(NXSlotPrefDeveloperMode, NO) && NXROMDefaultBool(NXSlotPrefShowDetails, NO);
+    if(showDetails && process)
+    {
+        content.secondaryText = [NSString stringWithFormat:@"%@ · running, pid %d", application.bundleIdentifier, process.pid];
+    }
+    else if(showDetails)
+    {
+        content.secondaryText = application.bundleIdentifier;
+    }
+    else
+    {
+        content.secondaryText = process ? @"Running" : @"Tap to open";
+    }
+
     content.secondaryTextProperties.color = UIColor.secondaryLabelColor;
     content.image = application.icon ?: [UIImage systemImageNamed:@"app.dashed"];
     content.imageProperties.maximumSize = CGSizeMake(40.0, 40.0);
