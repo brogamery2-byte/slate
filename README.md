@@ -2,7 +2,7 @@
 
 A custom ROM for [Nyxian](https://emexlabs.org/Nyxian/) by emexLabs.
 
-> **Status:** early planning. Nothing here boots yet.
+> **Status:** First Boot. Currently doesn’t have anything planned. (only has the settings menu)
 
 ## What is this?
 
