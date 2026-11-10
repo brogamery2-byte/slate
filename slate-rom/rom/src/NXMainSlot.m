@@ -523,6 +523,196 @@ static NSString *NXROMSignalProcess(pid_t pid, int sig)
 
 @end
 
+#pragma mark - Settings
+
+static NSString *const NXSlotPrefDeveloperMode = @"slate.pref.developerMode";
+static NSString *const NXSlotPrefShowDetails = @"slate.pref.showDetails";
+
+static NSString *NXROMManifestString(NSString *key, NSString *fallback)
+{
+    NSString *slot = NXROMSlotDirectory();
+    NSDictionary *manifest = slot ? [NSDictionary dictionaryWithContentsOfFile:[slot stringByAppendingPathComponent:@"manifest.plist"]] : nil;
+    id value = manifest[key];
+    if([value isKindOfClass:NSNumber.class])
+    {
+        return [value stringValue];
+    }
+    if([value isKindOfClass:NSString.class] && [value length] > 0)
+    {
+        return value;
+    }
+    return fallback;
+}
+
+@interface NXROMSettingsViewController : UITableViewController
+@property (nonatomic, copy) NSArray<NSDictionary *> *model;
+@end
+
+@implementation NXROMSettingsViewController
+
+- (instancetype)init
+{
+    return [super initWithStyle:UITableViewStyleInsetGrouped];
+}
+
+- (void)reloadModel
+{
+    BOOL developer = NXROMDefaultBool(NXSlotPrefDeveloperMode, NO);
+    NSUInteger appCount = NXROMApplications().count;
+
+    NSMutableArray<NSDictionary *> *sections = [NSMutableArray array];
+
+    [sections addObject:@{
+        @"title": @"About",
+        @"footer": @"",
+        @"rows": @[
+            @{ @"kind": @"value", @"title": @"Name", @"value": NXROMManifestString(@"NXRomName", @"Slate") },
+            @{ @"kind": @"value", @"title": @"Version", @"value": NXROMManifestString(@"NXRomVersion", @"unknown") },
+            @{ @"kind": @"value", @"title": @"Security version", @"value": NXROMManifestString(@"NXRomSecurityVersion", @"unknown") },
+            @{ @"kind": @"value", @"title": @"Identifier", @"value": NXROMManifestString(@"NXRomIdentifier", @"unknown") },
+            @{ @"kind": @"value", @"title": @"Requires Nyxian", @"value": NXROMManifestString(@"NXRomMinimumNyxianVersion", @"unknown") },
+            @{ @"kind": @"value", @"title": @"Apps", @"value": [NSString stringWithFormat:@"%lu", (unsigned long)appCount] },
+        ],
+    }];
+
+    NSMutableArray<NSDictionary *> *developerRows = [NSMutableArray array];
+    [developerRows addObject:@{ @"kind": @"switch", @"title": @"Developer menu", @"key": NXSlotPrefDeveloperMode, @"default": @NO }];
+    if(developer)
+    {
+        [developerRows addObject:@{ @"kind": @"link", @"title": @"Processes" }];
+        [developerRows addObject:@{ @"kind": @"switch", @"title": @"Show app details", @"key": NXSlotPrefShowDetails, @"default": @NO }];
+    }
+    [sections addObject:@{
+        @"title": @"Developer",
+        @"footer": developer ? @"App details shows each app's bundle identifier and process ID on the home screen." : @"",
+        @"rows": developerRows,
+    }];
+
+    [sections addObject:@{
+        @"title": @"",
+        @"footer": @"",
+        @"rows": @[ @{ @"kind": @"button", @"title": @"Reset Slate settings" } ],
+    }];
+
+    self.model = sections;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    self.title = @"Settings";
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"row"];
+    [self reloadModel];
+}
+
+- (void)switchChanged:(UISwitch *)sender
+{
+    NSString *key = sender.accessibilityIdentifier;
+    if(key.length == 0)
+    {
+        return;
+    }
+    [NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:key];
+    if([key isEqualToString:NXSlotPrefDeveloperMode])
+    {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self reloadModel];
+            [self.tableView reloadData];
+        });
+    }
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+{
+    return self.model.count;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
+{
+    return [self.model[section][@"rows"] count];
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
+{
+    NSString *title = self.model[section][@"title"];
+    return title.length > 0 ? title : nil;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
+{
+    NSString *footer = self.model[section][@"footer"];
+    return footer.length > 0 ? footer : nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    NSDictionary *row = self.model[indexPath.section][@"rows"][indexPath.row];
+    NSString *kind = row[@"kind"];
+
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"row" forIndexPath:indexPath];
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+
+    UIListContentConfiguration *content = [kind isEqualToString:@"value"] ? [UIListContentConfiguration valueCellConfiguration] : [UIListContentConfiguration cellConfiguration];
+    content.text = row[@"title"];
+
+    if([kind isEqualToString:@"value"])
+    {
+        content.secondaryText = row[@"value"];
+    }
+    else if([kind isEqualToString:@"switch"])
+    {
+        UISwitch *toggle = [UISwitch new];
+        toggle.on = NXROMDefaultBool(row[@"key"], [row[@"default"] boolValue]);
+        toggle.accessibilityIdentifier = row[@"key"];
+        [toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+    }
+    else if([kind isEqualToString:@"link"])
+    {
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    }
+    else if([kind isEqualToString:@"button"])
+    {
+        content.textProperties.color = UIColor.systemRedColor;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    }
+
+    cell.contentConfiguration = content;
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSDictionary *row = self.model[indexPath.section][@"rows"][indexPath.row];
+    NSString *kind = row[@"kind"];
+
+    if([kind isEqualToString:@"link"])
+    {
+        [self.navigationController pushViewController:[NXROMProcessesViewController new] animated:YES];
+    }
+    else if([kind isEqualToString:@"button"])
+    {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Reset Slate settings?"
+                                                                       message:@"This restores the default Slate settings."
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:NXSlotPrefDeveloperMode];
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:NXSlotPrefShowDetails];
+            [self reloadModel];
+            [self.tableView reloadData];
+        }]];
+        [self presentViewController:alert animated:YES completion:nil];
+    }
+}
+
+@end
+
 #pragma mark - Home
 
 @interface NXROMApplicationsViewController : UITableViewController
