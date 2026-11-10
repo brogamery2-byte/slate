@@ -748,7 +748,12 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
                                                                 action:@selector(showAppSwitcher:)];
     switcher.accessibilityLabel = @"App Switcher";
     switcher.enabled = (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone);
-    self.navigationItem.rightBarButtonItem = switcher;
+    UIBarButtonItem *settings = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"]
+                                                                 style:UIBarButtonItemStylePlain
+                                                                target:self
+                                                                action:@selector(showSettings:)];
+    settings.accessibilityLabel = @"Settings";
+    self.navigationItem.rightBarButtonItems = @[ settings, switcher ];
 }
 
 - (void)viewWillAppear:(BOOL)animated
