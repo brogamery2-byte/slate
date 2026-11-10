@@ -2,6 +2,11 @@
 
 A custom ROM for [Nyxian](https://emexlabs.org/Nyxian/) by emexLabs.
 
+[![Dev Build](https://github.com/brogamery2-byte/slate/actions/workflows/build-rom.yml/badge.svg)](https://github.com/brogamery2-byte/slate/actions/workflows/build-rom.yml)
+[![Release Build](https://github.com/brogamery2-byte/slate/actions/workflows/release-rom.yml/badge.svg)](https://github.com/brogamery2-byte/slate/actions/workflows/release-rom.yml)
+[![License: MIT](https://img.shields.io/github/license/brogamery2-byte/slate)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/brogamery2-byte/slate)](https://github.com/brogamery2-byte/slate/commits/main)
+
 > **Status:** First Boot. Currently doesn’t have anything planned. (only has the settings menu)
 
 ## What is this?
