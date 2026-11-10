@@ -528,6 +528,12 @@ static NSString *NXROMSignalProcess(pid_t pid, int sig)
 static NSString *const NXSlotPrefDeveloperMode = @"slate.pref.developerMode";
 static NSString *const NXSlotPrefShowDetails = @"slate.pref.showDetails";
 
+static BOOL NXROMDefaultBool(NSString *key, BOOL fallback)
+{
+    id value = [NSUserDefaults.standardUserDefaults objectForKey:key];
+    return value ? [value boolValue] : fallback;
+}
+
 static NSString *NXROMManifestString(NSString *key, NSString *fallback)
 {
     NSString *slot = NXROMSlotDirectory();
