@@ -817,6 +817,11 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
+- (void)showSettings:(id)sender
+{
+    [self.navigationController pushViewController:[NXROMSettingsViewController new] animated:YES];
+}
+
 - (void)showAppSwitcher:(id)sender
 {
     [[NXWindowServer shared] showAppSwitcherExternal];
