@@ -529,8 +529,13 @@ static NSString *const NXSlotPrefDeveloperMode = @"slate.pref.developerMode";
 static NSString *const NXSlotPrefShowDetails = @"slate.pref.showDetails";
 static NSString *const NXSlotPrefAccent = @"slate.pref.accent";
 static NSString *const NXSlotPrefLayout = @"slate.pref.layout";
+static NSString *const NXSlotPrefSetupOnUpdate = @"slate.pref.setupOnUpdate";
+static NSString *const NXSlotPrefSetupBuild = @"slate.setup.completedBuild";
+
+static BOOL NXSlotSetupShownThisSession = NO;
 
 static UIViewController *NXSlotMakeHome(void);
+static void NXSlotPresentSetup(UIViewController *presenter, BOOL force);
 
 static BOOL NXROMDefaultBool(NSString *key, BOOL fallback)
 {
@@ -645,6 +650,47 @@ static UIColor *NXSlotAccentColor(void)
     return NXSlotAccentColorForID(NXSlotChoice(NXSlotPrefAccent, NXSlotAccentOptions()));
 }
 
+static void NXSlotApplyAppearance(UINavigationController *navigation)
+{
+    if(!navigation)
+    {
+        return;
+    }
+    navigation.view.tintColor = NXSlotAccentColor();
+
+    BOOL wantsGrid = [NXSlotChoice(NXSlotPrefLayout, NXSlotLayoutOptions()) isEqualToString:@"grid"];
+    UIViewController *root = navigation.viewControllers.firstObject;
+    BOOL isGrid = [root isKindOfClass:NSClassFromString(@"NXROMGridViewController")];
+    if(wantsGrid != isGrid)
+    {
+        NSMutableArray<UIViewController *> *stack = [navigation.viewControllers mutableCopy];
+        stack[0] = NXSlotMakeHome();
+        [navigation setViewControllers:stack animated:NO];
+    }
+}
+
+static NSString *NXSlotBuildID(void)
+{
+    return [NSString stringWithFormat:@"%@|%@|%@",
+            NXROMManifestString(@"NXRomIdentifier", @""),
+            NXROMManifestString(@"NXRomVersion", @""),
+            NXROMManifestString(@"NXRomSecurityVersion", @"")];
+}
+
+static BOOL NXSlotSetupNeeded(void)
+{
+    NSString *done = [NSUserDefaults.standardUserDefaults stringForKey:NXSlotPrefSetupBuild];
+    if(done.length == 0)
+    {
+        return YES;
+    }
+    if(NXROMDefaultBool(NXSlotPrefSetupOnUpdate, YES))
+    {
+        return ![done isEqualToString:NXSlotBuildID()];
+    }
+    return NO;
+}
+
 @interface NXROMChoiceViewController : UITableViewController
 @property (nonatomic, copy) NSString *prefKey;
 @property (nonatomic, copy) NSArray<NSDictionary *> *options;
@@ -757,6 +803,15 @@ static UIColor *NXSlotAccentColor(void)
         ],
     }];
 
+    [sections addObject:@{
+        @"title": @"Setup",
+        @"footer": @"Slate walks you through setup the first time you open it after an update.",
+        @"rows": @[
+            @{ @"kind": @"switch", @"title": @"Show setup after updates", @"key": NXSlotPrefSetupOnUpdate, @"default": @YES },
+            @{ @"kind": @"setup", @"title": @"Run setup again" },
+        ],
+    }];
+
     NSMutableArray<NSDictionary *> *developerRows = [NSMutableArray array];
     [developerRows addObject:@{ @"kind": @"switch", @"title": @"Developer menu", @"key": NXSlotPrefDeveloperMode, @"default": @NO }];
     if(developer)
@@ -781,22 +836,7 @@ static UIColor *NXSlotAccentColor(void)
 
 - (void)applyAppearance
 {
-    UINavigationController *navigation = self.navigationController;
-    if(!navigation)
-    {
-        return;
-    }
-    navigation.view.tintColor = NXSlotAccentColor();
-
-    BOOL wantsGrid = [NXSlotChoice(NXSlotPrefLayout, NXSlotLayoutOptions()) isEqualToString:@"grid"];
-    UIViewController *root = navigation.viewControllers.firstObject;
-    BOOL isGrid = [root isKindOfClass:NSClassFromString(@"NXROMGridViewController")];
-    if(wantsGrid != isGrid)
-    {
-        NSMutableArray<UIViewController *> *stack = [navigation.viewControllers mutableCopy];
-        stack[0] = NXSlotMakeHome();
-        [navigation setViewControllers:stack animated:NO];
-    }
+    NXSlotApplyAppearance(self.navigationController);
 }
 
 - (void)viewDidLoad
@@ -892,6 +932,11 @@ static UIColor *NXSlotAccentColor(void)
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     }
+    else if([kind isEqualToString:@"setup"])
+    {
+        content.textProperties.color = self.view.tintColor;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    }
     else if([kind isEqualToString:@"button"])
     {
         content.textProperties.color = UIColor.systemRedColor;
@@ -923,6 +968,10 @@ static UIColor *NXSlotAccentColor(void)
         }];
         [self.navigationController pushViewController:picker animated:YES];
     }
+    else if([kind isEqualToString:@"setup"])
+    {
+        NXSlotPresentSetup(self, YES);
+    }
     else if([kind isEqualToString:@"button"])
     {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Reset Slate settings?"
@@ -930,7 +979,7 @@ static UIColor *NXSlotAccentColor(void)
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
         [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-            for(NSString *key in @[ NXSlotPrefDeveloperMode, NXSlotPrefShowDetails, NXSlotPrefAccent, NXSlotPrefLayout ])
+            for(NSString *key in @[ NXSlotPrefDeveloperMode, NXSlotPrefShowDetails, NXSlotPrefAccent, NXSlotPrefLayout, NXSlotPrefSetupOnUpdate, NXSlotPrefSetupBuild ])
             {
                 [NSUserDefaults.standardUserDefaults removeObjectForKey:key];
             }
@@ -943,6 +992,428 @@ static UIColor *NXSlotAccentColor(void)
 }
 
 @end
+
+#pragma mark - First-run setup
+
+static const NSInteger NXSlotSetupStepCount = 5;
+
+@interface NXROMSetupViewController : UIViewController
+@property (nonatomic, assign) NSInteger step;
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UILabel *subtitleLabel;
+@property (nonatomic, strong) UIView *contentView;
+@property (nonatomic, strong) UIPageControl *pageControl;
+@property (nonatomic, strong) UIButton *primaryButton;
+@property (nonatomic, strong) UIButton *secondaryButton;
+@property (nonatomic, copy) void (^completion)(void);
+@end
+
+@implementation NXROMSetupViewController
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    self.view.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:1.0];
+    self.view.tintColor = NXSlotAccentColor();
+
+    self.titleLabel = [UILabel new];
+    self.titleLabel.font = [UIFont systemFontOfSize:32.0 weight:UIFontWeightBold];
+    self.titleLabel.textColor = UIColor.labelColor;
+    self.titleLabel.textAlignment = NSTextAlignmentCenter;
+    self.titleLabel.numberOfLines = 0;
+
+    self.subtitleLabel = [UILabel new];
+    self.subtitleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    self.subtitleLabel.textColor = UIColor.secondaryLabelColor;
+    self.subtitleLabel.textAlignment = NSTextAlignmentCenter;
+    self.subtitleLabel.numberOfLines = 0;
+
+    self.contentView = [UIView new];
+
+    self.pageControl = [UIPageControl new];
+    self.pageControl.numberOfPages = NXSlotSetupStepCount;
+    self.pageControl.userInteractionEnabled = NO;
+
+    UIButtonConfiguration *primary = [UIButtonConfiguration filledButtonConfiguration];
+    primary.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
+    primary.buttonSize = UIButtonConfigurationSizeLarge;
+    self.primaryButton = [UIButton buttonWithConfiguration:primary primaryAction:nil];
+    [self.primaryButton addTarget:self action:@selector(nextTapped) forControlEvents:UIControlEventTouchUpInside];
+
+    UIButtonConfiguration *secondary = [UIButtonConfiguration plainButtonConfiguration];
+    self.secondaryButton = [UIButton buttonWithConfiguration:secondary primaryAction:nil];
+    [self.secondaryButton addTarget:self action:@selector(backTapped) forControlEvents:UIControlEventTouchUpInside];
+
+    UIStackView *buttons = [[UIStackView alloc] initWithArrangedSubviews:@[ self.primaryButton, self.secondaryButton ]];
+    buttons.axis = UILayoutConstraintAxisVertical;
+    buttons.spacing = 8.0;
+
+    for(UIView *view in @[ self.titleLabel, self.subtitleLabel, self.contentView, self.pageControl, buttons ])
+    {
+        view.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.view addSubview:view];
+    }
+
+    UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [self.titleLabel.topAnchor constraintEqualToAnchor:guide.topAnchor constant:48.0],
+        [self.titleLabel.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:24.0],
+        [self.titleLabel.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-24.0],
+        [self.subtitleLabel.topAnchor constraintEqualToAnchor:self.titleLabel.bottomAnchor constant:12.0],
+        [self.subtitleLabel.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:24.0],
+        [self.subtitleLabel.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-24.0],
+        [self.contentView.topAnchor constraintEqualToAnchor:self.subtitleLabel.bottomAnchor constant:32.0],
+        [self.contentView.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:24.0],
+        [self.contentView.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-24.0],
+        [self.contentView.bottomAnchor constraintLessThanOrEqualToAnchor:self.pageControl.topAnchor constant:-16.0],
+        [self.pageControl.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [self.pageControl.bottomAnchor constraintEqualToAnchor:buttons.topAnchor constant:-16.0],
+        [buttons.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:24.0],
+        [buttons.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-24.0],
+        [buttons.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-16.0],
+    ]];
+
+    [self showStep:0 animated:NO];
+}
+
+- (void)setTitle:(NSString *)title forButton:(UIButton *)button
+{
+    UIButtonConfiguration *configuration = button.configuration;
+    configuration.title = title;
+    button.configuration = configuration;
+    button.hidden = (title.length == 0);
+}
+
+- (void)placeContent:(UIView *)view fillWidth:(BOOL)fill
+{
+    view.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:view];
+    [view.topAnchor constraintEqualToAnchor:self.contentView.topAnchor].active = YES;
+    if(fill)
+    {
+        [view.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor].active = YES;
+        [view.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor].active = YES;
+    }
+    else
+    {
+        [view.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor].active = YES;
+        [view.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.contentView.leadingAnchor].active = YES;
+        [view.trailingAnchor constraintLessThanOrEqualToAnchor:self.contentView.trailingAnchor].active = YES;
+    }
+}
+
+- (void)showStep:(NSInteger)step animated:(BOOL)animated
+{
+    self.step = step;
+    void (^update)(void) = ^{
+        for(UIView *view in self.contentView.subviews)
+        {
+            [view removeFromSuperview];
+        }
+        [self configureStep];
+    };
+    if(animated)
+    {
+        [UIView transitionWithView:self.view duration:0.28 options:UIViewAnimationOptionTransitionCrossDissolve animations:update completion:nil];
+    }
+    else
+    {
+        update();
+    }
+}
+
+- (void)configureStep
+{
+    self.pageControl.currentPage = self.step;
+    self.view.tintColor = NXSlotAccentColor();
+
+    switch(self.step)
+    {
+        case 0:
+        {
+            self.titleLabel.text = @"Welcome to Slate";
+            self.subtitleLabel.text = @"Let's set up your home screen. It only takes a moment.";
+            UIImageSymbolConfiguration *symbol = [UIImageSymbolConfiguration configurationWithPointSize:88.0 weight:UIImageSymbolWeightRegular];
+            UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"sparkles" withConfiguration:symbol]];
+            icon.tintColor = self.view.tintColor;
+            [self placeContent:icon fillWidth:NO];
+            [self setTitle:@"Get Started" forButton:self.primaryButton];
+            [self setTitle:@"Skip setup" forButton:self.secondaryButton];
+            break;
+        }
+        case 1:
+        {
+            self.titleLabel.text = @"Choose your color";
+            self.subtitleLabel.text = @"This tints buttons and icons across Slate.";
+            [self placeContent:[self accentView] fillWidth:NO];
+            [self setTitle:@"Continue" forButton:self.primaryButton];
+            [self setTitle:@"Back" forButton:self.secondaryButton];
+            break;
+        }
+        case 2:
+        {
+            self.titleLabel.text = @"Pick a home layout";
+            self.subtitleLabel.text = @"How should your apps appear?";
+            [self placeContent:[self layoutView] fillWidth:YES];
+            [self setTitle:@"Continue" forButton:self.primaryButton];
+            [self setTitle:@"Back" forButton:self.secondaryButton];
+            break;
+        }
+        case 3:
+        {
+            self.titleLabel.text = @"Developer tools";
+            self.subtitleLabel.text = @"Optional. You can change this any time in Settings.";
+            [self placeContent:[self developerView] fillWidth:YES];
+            [self setTitle:@"Continue" forButton:self.primaryButton];
+            [self setTitle:@"Back" forButton:self.secondaryButton];
+            break;
+        }
+        default:
+        {
+            self.titleLabel.text = @"You're all set";
+            self.subtitleLabel.text = @"You can change all of this later in Settings.";
+            [self placeContent:[self summaryView] fillWidth:YES];
+            [self setTitle:@"Start using Slate" forButton:self.primaryButton];
+            [self setTitle:@"Back" forButton:self.secondaryButton];
+            break;
+        }
+    }
+}
+
+- (UIView *)accentView
+{
+    NSArray<NSDictionary *> *options = NXSlotAccentOptions();
+    NSString *current = NXSlotChoice(NXSlotPrefAccent, options);
+
+    UIStackView *rows = [UIStackView new];
+    rows.axis = UILayoutConstraintAxisVertical;
+    rows.spacing = 18.0;
+    rows.alignment = UIStackViewAlignmentCenter;
+
+    for(NSInteger start = 0; start < (NSInteger)options.count; start += 3)
+    {
+        UIStackView *row = [UIStackView new];
+        row.axis = UILayoutConstraintAxisHorizontal;
+        row.spacing = 18.0;
+        for(NSInteger index = start; index < MIN(start + 3, (NSInteger)options.count); index++)
+        {
+            NSDictionary *option = options[index];
+            UIButton *swatch = [UIButton buttonWithType:UIButtonTypeCustom];
+            swatch.backgroundColor = NXSlotAccentColorForID(option[@"id"]);
+            swatch.layer.cornerRadius = 32.0;
+            swatch.tag = index;
+            swatch.accessibilityLabel = option[@"title"];
+            [swatch.widthAnchor constraintEqualToConstant:64.0].active = YES;
+            [swatch.heightAnchor constraintEqualToConstant:64.0].active = YES;
+            if([option[@"id"] isEqualToString:current])
+            {
+                swatch.layer.borderWidth = 4.0;
+                swatch.layer.borderColor = UIColor.whiteColor.CGColor;
+                swatch.tintColor = UIColor.whiteColor;
+                [swatch setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
+            }
+            [swatch addTarget:self action:@selector(swatchTapped:) forControlEvents:UIControlEventTouchUpInside];
+            [row addArrangedSubview:swatch];
+        }
+        [rows addArrangedSubview:row];
+    }
+    return rows;
+}
+
+- (UIView *)layoutView
+{
+    NSString *current = NXSlotChoice(NXSlotPrefLayout, NXSlotLayoutOptions());
+    NSArray<NSDictionary *> *items = @[
+        @{ @"id": @"list", @"title": @"List", @"detail": @"Rows with names", @"symbol": @"list.bullet.rectangle" },
+        @{ @"id": @"grid", @"title": @"Grid", @"detail": @"Large icons", @"symbol": @"square.grid.2x2" },
+    ];
+
+    UIStackView *stack = [UIStackView new];
+    stack.axis = UILayoutConstraintAxisHorizontal;
+    stack.spacing = 16.0;
+    stack.distribution = UIStackViewDistributionFillEqually;
+
+    for(NSDictionary *item in items)
+    {
+        UIButtonConfiguration *configuration = [UIButtonConfiguration grayButtonConfiguration];
+        configuration.image = [UIImage systemImageNamed:item[@"symbol"] withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:40.0]];
+        configuration.imagePlacement = NSDirectionalRectEdgeTop;
+        configuration.imagePadding = 12.0;
+        configuration.title = item[@"title"];
+        configuration.subtitle = item[@"detail"];
+        configuration.cornerStyle = UIButtonConfigurationCornerStyleLarge;
+        configuration.contentInsets = NSDirectionalEdgeInsetsMake(24.0, 12.0, 24.0, 12.0);
+
+        UIButton *card = [UIButton buttonWithConfiguration:configuration primaryAction:nil];
+        card.accessibilityIdentifier = item[@"id"];
+        card.layer.cornerRadius = 22.0;
+        if([item[@"id"] isEqualToString:current])
+        {
+            card.layer.borderWidth = 3.0;
+            card.layer.borderColor = self.view.tintColor.CGColor;
+        }
+        [card addTarget:self action:@selector(cardTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [stack addArrangedSubview:card];
+    }
+    return stack;
+}
+
+- (UIView *)developerView
+{
+    UIView *container = [UIView new];
+    container.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+    container.layer.cornerRadius = 16.0;
+
+    UILabel *label = [UILabel new];
+    label.text = @"Developer menu";
+    label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+
+    UISwitch *toggle = [UISwitch new];
+    toggle.on = NXROMDefaultBool(NXSlotPrefDeveloperMode, NO);
+    [toggle addTarget:self action:@selector(developerToggled:) forControlEvents:UIControlEventValueChanged];
+
+    UILabel *detail = [UILabel new];
+    detail.text = @"Adds a process list and app details to Slate. Most people can leave this off.";
+    detail.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    detail.textColor = UIColor.secondaryLabelColor;
+    detail.numberOfLines = 0;
+
+    for(UIView *view in @[ label, toggle, detail ])
+    {
+        view.translatesAutoresizingMaskIntoConstraints = NO;
+        [container addSubview:view];
+    }
+
+    [NSLayoutConstraint activateConstraints:@[
+        [label.topAnchor constraintEqualToAnchor:container.topAnchor constant:16.0],
+        [label.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:16.0],
+        [label.trailingAnchor constraintLessThanOrEqualToAnchor:toggle.leadingAnchor constant:-12.0],
+        [toggle.centerYAnchor constraintEqualToAnchor:label.centerYAnchor],
+        [toggle.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-16.0],
+        [detail.topAnchor constraintEqualToAnchor:label.bottomAnchor constant:8.0],
+        [detail.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:16.0],
+        [detail.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-16.0],
+        [detail.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-16.0],
+    ]];
+    return container;
+}
+
+- (UIView *)summaryView
+{
+    NSArray<NSString *> *lines = @[
+        [NSString stringWithFormat:@"Accent color: %@", NXSlotChoiceTitle(NXSlotPrefAccent, NXSlotAccentOptions())],
+        [NSString stringWithFormat:@"Home layout: %@", NXSlotChoiceTitle(NXSlotPrefLayout, NXSlotLayoutOptions())],
+        [NSString stringWithFormat:@"Developer menu: %@", NXROMDefaultBool(NXSlotPrefDeveloperMode, NO) ? @"On" : @"Off"],
+    ];
+
+    UIStackView *stack = [UIStackView new];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 12.0;
+    stack.layoutMarginsRelativeArrangement = YES;
+    stack.layoutMargins = UIEdgeInsetsMake(20.0, 20.0, 20.0, 20.0);
+    stack.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+    stack.layer.cornerRadius = 16.0;
+
+    for(NSString *line in lines)
+    {
+        UILabel *label = [UILabel new];
+        label.text = line;
+        label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        [stack addArrangedSubview:label];
+    }
+    return stack;
+}
+
+- (void)swatchTapped:(UIButton *)sender
+{
+    NSArray<NSDictionary *> *options = NXSlotAccentOptions();
+    if(sender.tag < 0 || sender.tag >= (NSInteger)options.count)
+    {
+        return;
+    }
+    [NSUserDefaults.standardUserDefaults setObject:options[sender.tag][@"id"] forKey:NXSlotPrefAccent];
+    [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+    [self showStep:self.step animated:NO];
+}
+
+- (void)cardTapped:(UIButton *)sender
+{
+    NSString *identifier = sender.accessibilityIdentifier;
+    if(identifier.length == 0)
+    {
+        return;
+    }
+    [NSUserDefaults.standardUserDefaults setObject:identifier forKey:NXSlotPrefLayout];
+    [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+    [self showStep:self.step animated:NO];
+}
+
+- (void)developerToggled:(UISwitch *)sender
+{
+    [NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:NXSlotPrefDeveloperMode];
+}
+
+- (void)nextTapped
+{
+    if(self.step < NXSlotSetupStepCount - 1)
+    {
+        [self showStep:self.step + 1 animated:YES];
+    }
+    else
+    {
+        [self finish];
+    }
+}
+
+- (void)backTapped
+{
+    if(self.step == 0)
+    {
+        [self finish];
+    }
+    else
+    {
+        [self showStep:self.step - 1 animated:YES];
+    }
+}
+
+- (void)finish
+{
+    [NSUserDefaults.standardUserDefaults setObject:NXSlotBuildID() forKey:NXSlotPrefSetupBuild];
+    void (^completion)(void) = self.completion;
+    [self dismissViewControllerAnimated:YES completion:^{
+        if(completion)
+        {
+            completion();
+        }
+    }];
+}
+
+@end
+
+static void NXSlotPresentSetup(UIViewController *presenter, BOOL force)
+{
+    if(!force && (NXSlotSetupShownThisSession || !NXSlotSetupNeeded()))
+    {
+        return;
+    }
+    if(presenter == nil || presenter.presentedViewController != nil)
+    {
+        return;
+    }
+    NXSlotSetupShownThisSession = YES;
+
+    NXROMSetupViewController *setup = [NXROMSetupViewController new];
+    __weak typeof(presenter) weakPresenter = presenter;
+    setup.completion = ^{
+        NXSlotApplyAppearance(weakPresenter.navigationController);
+    };
+    setup.modalPresentationStyle = UIModalPresentationFullScreen;
+    setup.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+    setup.modalInPresentation = YES;
+    [presenter presentViewController:setup animated:YES completion:nil];
+}
 
 #pragma mark - Home
 
@@ -998,6 +1469,12 @@ static UIColor *NXSlotAccentColor(void)
     self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) {
         [weakSelf refreshRunningState];
     }];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    NXSlotPresentSetup(self, NO);
 }
 
 - (void)viewWillDisappear:(BOOL)animated
@@ -1223,6 +1700,12 @@ static UIColor *NXSlotAccentColor(void)
     self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) {
         [weakSelf refreshRunningState];
     }];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    NXSlotPresentSetup(self, NO);
 }
 
 - (void)viewWillDisappear:(BOOL)animated
