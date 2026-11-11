@@ -527,6 +527,10 @@ static NSString *NXROMSignalProcess(pid_t pid, int sig)
 
 static NSString *const NXSlotPrefDeveloperMode = @"slate.pref.developerMode";
 static NSString *const NXSlotPrefShowDetails = @"slate.pref.showDetails";
+static NSString *const NXSlotPrefAccent = @"slate.pref.accent";
+static NSString *const NXSlotPrefLayout = @"slate.pref.layout";
+
+static UIViewController *NXSlotMakeHome(void);
 
 static BOOL NXROMDefaultBool(NSString *key, BOOL fallback)
 {
@@ -549,6 +553,169 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
     }
     return fallback;
 }
+
+static NSArray<NSDictionary *> *NXSlotAccentOptions(void)
+{
+    return @[
+        @{ @"id": @"slate", @"title": @"Slate" },
+        @{ @"id": @"blue", @"title": @"Blue" },
+        @{ @"id": @"indigo", @"title": @"Indigo" },
+        @{ @"id": @"purple", @"title": @"Purple" },
+        @{ @"id": @"pink", @"title": @"Pink" },
+        @{ @"id": @"red", @"title": @"Red" },
+        @{ @"id": @"orange", @"title": @"Orange" },
+        @{ @"id": @"green", @"title": @"Green" },
+        @{ @"id": @"teal", @"title": @"Teal" },
+    ];
+}
+
+static NSArray<NSDictionary *> *NXSlotLayoutOptions(void)
+{
+    return @[
+        @{ @"id": @"list", @"title": @"List" },
+        @{ @"id": @"grid", @"title": @"Grid" },
+    ];
+}
+
+static NSString *NXSlotChoice(NSString *key, NSArray<NSDictionary *> *options)
+{
+    NSString *stored = [NSUserDefaults.standardUserDefaults stringForKey:key];
+    for(NSDictionary *option in options)
+    {
+        if([option[@"id"] isEqualToString:stored])
+        {
+            return stored;
+        }
+    }
+    return options.firstObject[@"id"];
+}
+
+static NSString *NXSlotChoiceTitle(NSString *key, NSArray<NSDictionary *> *options)
+{
+    NSString *current = NXSlotChoice(key, options);
+    for(NSDictionary *option in options)
+    {
+        if([option[@"id"] isEqualToString:current])
+        {
+            return option[@"title"];
+        }
+    }
+    return current;
+}
+
+static UIColor *NXSlotAccentColorForID(NSString *identifier)
+{
+    if([identifier isEqualToString:@"blue"])
+    {
+        return UIColor.systemBlueColor;
+    }
+    if([identifier isEqualToString:@"indigo"])
+    {
+        return UIColor.systemIndigoColor;
+    }
+    if([identifier isEqualToString:@"purple"])
+    {
+        return UIColor.systemPurpleColor;
+    }
+    if([identifier isEqualToString:@"pink"])
+    {
+        return UIColor.systemPinkColor;
+    }
+    if([identifier isEqualToString:@"red"])
+    {
+        return UIColor.systemRedColor;
+    }
+    if([identifier isEqualToString:@"orange"])
+    {
+        return UIColor.systemOrangeColor;
+    }
+    if([identifier isEqualToString:@"green"])
+    {
+        return UIColor.systemGreenColor;
+    }
+    if([identifier isEqualToString:@"teal"])
+    {
+        return UIColor.systemTealColor;
+    }
+    return [UIColor colorWithRed:0.45 green:0.62 blue:0.95 alpha:1.0];
+}
+
+static UIColor *NXSlotAccentColor(void)
+{
+    return NXSlotAccentColorForID(NXSlotChoice(NXSlotPrefAccent, NXSlotAccentOptions()));
+}
+
+@interface NXROMChoiceViewController : UITableViewController
+@property (nonatomic, copy) NSString *prefKey;
+@property (nonatomic, copy) NSArray<NSDictionary *> *options;
+@property (nonatomic, copy) void (^onChange)(void);
+- (instancetype)initWithTitle:(NSString *)title
+                      prefKey:(NSString *)prefKey
+                      options:(NSArray<NSDictionary *> *)options
+                     onChange:(void (^)(void))onChange;
+@end
+
+@implementation NXROMChoiceViewController
+
+- (instancetype)initWithTitle:(NSString *)title
+                      prefKey:(NSString *)prefKey
+                      options:(NSArray<NSDictionary *> *)options
+                     onChange:(void (^)(void))onChange
+{
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if(self)
+    {
+        self.title = title;
+        _prefKey = [prefKey copy];
+        _options = [options copy];
+        _onChange = [onChange copy];
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"choice"];
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
+{
+    return self.options.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    NSDictionary *option = self.options[indexPath.row];
+    NSString *current = NXSlotChoice(self.prefKey, self.options);
+
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"choice" forIndexPath:indexPath];
+    UIListContentConfiguration *content = [UIListContentConfiguration cellConfiguration];
+    content.text = option[@"title"];
+    if([self.prefKey isEqualToString:NXSlotPrefAccent])
+    {
+        content.image = [UIImage systemImageNamed:@"circle.fill"];
+        content.imageProperties.tintColor = NXSlotAccentColorForID(option[@"id"]);
+    }
+    cell.contentConfiguration = content;
+    cell.accessoryType = [option[@"id"] isEqualToString:current] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSDictionary *option = self.options[indexPath.row];
+    [NSUserDefaults.standardUserDefaults setObject:option[@"id"] forKey:self.prefKey];
+    [tableView reloadData];
+    if(self.onChange)
+    {
+        self.onChange();
+    }
+}
+
+@end
 
 @interface NXROMSettingsViewController : UITableViewController
 @property (nonatomic, copy) NSArray<NSDictionary *> *model;
@@ -581,6 +748,15 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
         ],
     }];
 
+    [sections addObject:@{
+        @"title": @"Appearance",
+        @"footer": @"Changes apply right away.",
+        @"rows": @[
+            @{ @"kind": @"choice", @"title": @"Accent color", @"key": NXSlotPrefAccent, @"options": NXSlotAccentOptions(), @"value": NXSlotChoiceTitle(NXSlotPrefAccent, NXSlotAccentOptions()) },
+            @{ @"kind": @"choice", @"title": @"Home layout", @"key": NXSlotPrefLayout, @"options": NXSlotLayoutOptions(), @"value": NXSlotChoiceTitle(NXSlotPrefLayout, NXSlotLayoutOptions()) },
+        ],
+    }];
+
     NSMutableArray<NSDictionary *> *developerRows = [NSMutableArray array];
     [developerRows addObject:@{ @"kind": @"switch", @"title": @"Developer menu", @"key": NXSlotPrefDeveloperMode, @"default": @NO }];
     if(developer)
@@ -590,7 +766,7 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
     }
     [sections addObject:@{
         @"title": @"Developer",
-        @"footer": developer ? @"App details shows each app's bundle identifier and process ID on the home screen." : @"",
+        @"footer": developer ? @"App details shows each app's bundle identifier and process ID on the home screen (list layout)." : @"",
         @"rows": developerRows,
     }];
 
@@ -603,6 +779,26 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
     self.model = sections;
 }
 
+- (void)applyAppearance
+{
+    UINavigationController *navigation = self.navigationController;
+    if(!navigation)
+    {
+        return;
+    }
+    navigation.view.tintColor = NXSlotAccentColor();
+
+    BOOL wantsGrid = [NXSlotChoice(NXSlotPrefLayout, NXSlotLayoutOptions()) isEqualToString:@"grid"];
+    UIViewController *root = navigation.viewControllers.firstObject;
+    BOOL isGrid = [root isKindOfClass:NSClassFromString(@"NXROMGridViewController")];
+    if(wantsGrid != isGrid)
+    {
+        NSMutableArray<UIViewController *> *stack = [navigation.viewControllers mutableCopy];
+        stack[0] = NXSlotMakeHome();
+        [navigation setViewControllers:stack animated:NO];
+    }
+}
+
 - (void)viewDidLoad
 {
     [super viewDidLoad];
@@ -610,6 +806,14 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"row"];
     [self reloadModel];
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    self.navigationController.view.tintColor = NXSlotAccentColor();
+    [self reloadModel];
+    [self.tableView reloadData];
 }
 
 - (void)switchChanged:(UISwitch *)sender
@@ -661,12 +865,19 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
     cell.accessoryType = UITableViewCellAccessoryNone;
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
 
-    UIListContentConfiguration *content = [kind isEqualToString:@"value"] ? [UIListContentConfiguration valueCellConfiguration] : [UIListContentConfiguration cellConfiguration];
+    BOOL valueStyle = [kind isEqualToString:@"value"] || [kind isEqualToString:@"choice"];
+    UIListContentConfiguration *content = valueStyle ? [UIListContentConfiguration valueCellConfiguration] : [UIListContentConfiguration cellConfiguration];
     content.text = row[@"title"];
 
     if([kind isEqualToString:@"value"])
     {
         content.secondaryText = row[@"value"];
+    }
+    else if([kind isEqualToString:@"choice"])
+    {
+        content.secondaryText = row[@"value"];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     }
     else if([kind isEqualToString:@"switch"])
     {
@@ -701,6 +912,17 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
     {
         [self.navigationController pushViewController:[NXROMProcessesViewController new] animated:YES];
     }
+    else if([kind isEqualToString:@"choice"])
+    {
+        __weak typeof(self) weakSelf = self;
+        NXROMChoiceViewController *picker = [[NXROMChoiceViewController alloc] initWithTitle:row[@"title"]
+                                                                                     prefKey:row[@"key"]
+                                                                                     options:row[@"options"]
+                                                                                    onChange:^{
+            [weakSelf applyAppearance];
+        }];
+        [self.navigationController pushViewController:picker animated:YES];
+    }
     else if([kind isEqualToString:@"button"])
     {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Reset Slate settings?"
@@ -708,8 +930,11 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
         [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-            [NSUserDefaults.standardUserDefaults removeObjectForKey:NXSlotPrefDeveloperMode];
-            [NSUserDefaults.standardUserDefaults removeObjectForKey:NXSlotPrefShowDetails];
+            for(NSString *key in @[ NXSlotPrefDeveloperMode, NXSlotPrefShowDetails, NXSlotPrefAccent, NXSlotPrefLayout ])
+            {
+                [NSUserDefaults.standardUserDefaults removeObjectForKey:key];
+            }
+            [self applyAppearance];
             [self reloadModel];
             [self.tableView reloadData];
         }]];
@@ -765,6 +990,7 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
+    self.navigationController.view.tintColor = NXSlotAccentColor();
     self.applications = NXROMApplications();
     self.runningPids = [self currentRunningPids];
     [self.tableView reloadData];
@@ -869,7 +1095,6 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
     {
         content.secondaryText = process ? @"Running" : @"Tap to open";
     }
-
     content.secondaryTextProperties.color = UIColor.secondaryLabelColor;
     content.image = application.icon ?: [UIImage systemImageNamed:@"app.dashed"];
     content.imageProperties.maximumSize = CGSizeMake(40.0, 40.0);
@@ -887,6 +1112,222 @@ static NSString *NXROMManifestString(NSString *key, NSString *fallback)
 }
 
 @end
+
+#pragma mark - Grid layout
+
+@interface NXROMGridCell : UICollectionViewCell
+@property (nonatomic, strong) UIImageView *iconView;
+@property (nonatomic, strong) UILabel *nameLabel;
+@property (nonatomic, strong) UIView *runningDot;
+@end
+
+@implementation NXROMGridCell
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if(self)
+    {
+        _iconView = [UIImageView new];
+        _iconView.contentMode = UIViewContentModeScaleAspectFit;
+        _iconView.layer.cornerRadius = 14.0;
+        _iconView.clipsToBounds = YES;
+
+        _nameLabel = [UILabel new];
+        _nameLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+        _nameLabel.textAlignment = NSTextAlignmentCenter;
+        _nameLabel.numberOfLines = 2;
+
+        _runningDot = [UIView new];
+        _runningDot.backgroundColor = UIColor.systemGreenColor;
+        _runningDot.layer.cornerRadius = 4.0;
+
+        for(UIView *view in @[ _iconView, _nameLabel, _runningDot ])
+        {
+            view.translatesAutoresizingMaskIntoConstraints = NO;
+            [self.contentView addSubview:view];
+        }
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_iconView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:4.0],
+            [_iconView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
+            [_iconView.widthAnchor constraintEqualToConstant:60.0],
+            [_iconView.heightAnchor constraintEqualToConstant:60.0],
+            [_nameLabel.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:6.0],
+            [_nameLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+            [_nameLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+            [_runningDot.widthAnchor constraintEqualToConstant:8.0],
+            [_runningDot.heightAnchor constraintEqualToConstant:8.0],
+            [_runningDot.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
+            [_runningDot.topAnchor constraintEqualToAnchor:_nameLabel.bottomAnchor constant:4.0],
+        ]];
+    }
+    return self;
+}
+
+@end
+
+@interface NXROMGridViewController : UICollectionViewController
+@property (nonatomic, copy) NSArray<NXROMApplication *> *applications;
+@property (nonatomic, copy) NSArray<NSNumber *> *runningPids;
+@property (nonatomic, strong) NSTimer *refreshTimer;
+@end
+
+@implementation NXROMGridViewController
+
+- (instancetype)init
+{
+    UICollectionViewFlowLayout *layout = [UICollectionViewFlowLayout new];
+    layout.itemSize = CGSizeMake(92.0, 112.0);
+    layout.minimumInteritemSpacing = 8.0;
+    layout.minimumLineSpacing = 16.0;
+    layout.sectionInset = UIEdgeInsetsMake(16.0, 16.0, 24.0, 16.0);
+    return [super initWithCollectionViewLayout:layout];
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    self.title = NXROMDisplayName();
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
+    self.collectionView.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:1.0];
+    [self.collectionView registerClass:NXROMGridCell.class forCellWithReuseIdentifier:@"app"];
+
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"list.bullet.rectangle"]
+                                                                             style:UIBarButtonItemStylePlain
+                                                                            target:self
+                                                                            action:@selector(showProcesses:)];
+    self.navigationItem.leftBarButtonItem.accessibilityLabel = @"Processes";
+
+    UIBarButtonItem *settings = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"]
+                                                                 style:UIBarButtonItemStylePlain
+                                                                target:self
+                                                                action:@selector(showSettings:)];
+    settings.accessibilityLabel = @"Settings";
+
+    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.stack.3d.up"]
+                                                                 style:UIBarButtonItemStylePlain
+                                                                target:self
+                                                                action:@selector(showAppSwitcher:)];
+    switcher.accessibilityLabel = @"App Switcher";
+    switcher.enabled = (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone);
+    self.navigationItem.rightBarButtonItems = @[ settings, switcher ];
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    self.navigationController.view.tintColor = NXSlotAccentColor();
+    [self reloadApplications];
+    __weak typeof(self) weakSelf = self;
+    self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) {
+        [weakSelf refreshRunningState];
+    }];
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    [self.refreshTimer invalidate];
+    self.refreshTimer = nil;
+}
+
+- (NSArray<NSNumber *> *)currentRunningPids
+{
+    NSMutableArray<NSNumber *> *pids = [NSMutableArray arrayWithCapacity:self.applications.count];
+    for(NXROMApplication *application in self.applications)
+    {
+        PEProcess *process = [[PEProcessManager shared] processForBundleIdentifier:application.bundleIdentifier];
+        [pids addObject:@(process ? process.pid : 0)];
+    }
+    return pids;
+}
+
+- (void)reloadApplications
+{
+    self.applications = NXROMApplications();
+    self.runningPids = [self currentRunningPids];
+    if(self.applications.count == 0)
+    {
+        UILabel *label = [UILabel new];
+        label.text = @"This ROM ships no apps (Application/*.app).";
+        label.textAlignment = NSTextAlignmentCenter;
+        label.numberOfLines = 0;
+        label.textColor = UIColor.secondaryLabelColor;
+        self.collectionView.backgroundView = label;
+    }
+    else
+    {
+        self.collectionView.backgroundView = nil;
+    }
+    [self.collectionView reloadData];
+}
+
+- (void)refreshRunningState
+{
+    NSArray<NSNumber *> *pids = [self currentRunningPids];
+    if([pids isEqualToArray:self.runningPids])
+    {
+        return;
+    }
+    self.runningPids = pids;
+    [self.collectionView reloadData];
+}
+
+- (void)showProcesses:(id)sender
+{
+    UINavigationController *sheet = [[UINavigationController alloc] initWithRootViewController:[NXROMProcessesViewController new]];
+    sheet.modalPresentationStyle = UIModalPresentationPageSheet;
+    UISheetPresentationController *presentation = sheet.sheetPresentationController;
+    presentation.detents = @[ UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent ];
+    presentation.prefersGrabberVisible = YES;
+    presentation.prefersScrollingExpandsWhenScrolledToEdge = NO;
+    presentation.prefersEdgeAttachedInCompactHeight = YES;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)showSettings:(id)sender
+{
+    [self.navigationController pushViewController:[NXROMSettingsViewController new] animated:YES];
+}
+
+- (void)showAppSwitcher:(id)sender
+{
+    [[NXWindowServer shared] showAppSwitcherExternal];
+}
+
+- (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section
+{
+    return self.applications.count;
+}
+
+- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath
+{
+    NXROMGridCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"app" forIndexPath:indexPath];
+    NXROMApplication *application = self.applications[indexPath.item];
+    PEProcess *process = [[PEProcessManager shared] processForBundleIdentifier:application.bundleIdentifier];
+    cell.iconView.image = application.icon ?: [UIImage systemImageNamed:@"app.dashed"];
+    cell.nameLabel.text = application.name;
+    cell.runningDot.hidden = (process == nil);
+    return cell;
+}
+
+- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath
+{
+    [collectionView deselectItemAtIndexPath:indexPath animated:YES];
+    NXROMOpenApplication(self.applications[indexPath.item]);
+}
+
+@end
+
+static UIViewController *NXSlotMakeHome(void)
+{
+    if([NXSlotChoice(NXSlotPrefLayout, NXSlotLayoutOptions()) isEqualToString:@"grid"])
+    {
+        return [NXROMGridViewController new];
+    }
+    return [NXROMApplicationsViewController new];
+}
 
 UIViewController *NXMainSlot(void)
 {
@@ -912,10 +1353,10 @@ UIViewController *NXMainSlot(void)
     BOOL loadKexts = !NXBootArgsHasFlag(bootArguments, NX_BOOT_ARG_NO_KEXTS);
     [[PEUserspaceManager shared] bootWithKextLoadingEnabled:loadKexts];
 
-    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:[NXROMApplicationsViewController new]];
+    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:NXSlotMakeHome()];
     navigation.navigationBar.prefersLargeTitles = YES;
     navigation.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-    navigation.view.tintColor = [UIColor colorWithRed:0.45 green:0.62 blue:0.95 alpha:1.0];
+    navigation.view.tintColor = NXSlotAccentColor();
     return navigation;
 }
 
