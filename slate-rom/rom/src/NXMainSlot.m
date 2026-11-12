@@ -1066,7 +1066,7 @@ static const NSInteger NXSlotSetupStepCount = 5;
         [self.contentView.topAnchor constraintEqualToAnchor:self.subtitleLabel.bottomAnchor constant:32.0],
         [self.contentView.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:24.0],
         [self.contentView.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-24.0],
-        [self.contentView.bottomAnchor constraintLessThanOrEqualToAnchor:self.pageControl.topAnchor constant:-16.0],
+        [self.contentView.bottomAnchor constraintEqualToAnchor:self.pageControl.topAnchor constant:-16.0],
         [self.pageControl.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [self.pageControl.bottomAnchor constraintEqualToAnchor:buttons.topAnchor constant:-16.0],
         [buttons.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:24.0],
@@ -1074,7 +1074,22 @@ static const NSInteger NXSlotSetupStepCount = 5;
         [buttons.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-16.0],
     ]];
 
+    self.navigationItem.hidesBackButton = YES;
     [self showStep:0 animated:NO];
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [self.navigationController setNavigationBarHidden:YES animated:animated];
+    self.navigationController.interactivePopGestureRecognizer.enabled = NO;
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    [self.navigationController setNavigationBarHidden:NO animated:animated];
+    self.navigationController.interactivePopGestureRecognizer.enabled = YES;
 }
 
 - (void)setTitle:(NSString *)title forButton:(UIButton *)button
@@ -1382,25 +1397,47 @@ static const NSInteger NXSlotSetupStepCount = 5;
 {
     [NSUserDefaults.standardUserDefaults setObject:NXSlotBuildID() forKey:NXSlotPrefSetupBuild];
     void (^completion)(void) = self.completion;
-    [self dismissViewControllerAnimated:YES completion:^{
+    UINavigationController *navigation = self.navigationController;
+    if(!navigation)
+    {
         if(completion)
         {
             completion();
         }
-    }];
+        return;
+    }
+    [navigation popViewControllerAnimated:YES];
+    id<UIViewControllerTransitionCoordinator> coordinator = navigation.transitionCoordinator;
+    if(coordinator)
+    {
+        [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+            if(completion)
+            {
+                completion();
+            }
+        }];
+    }
+    else if(completion)
+    {
+        completion();
+    }
 }
 
 @end
 
 static void NXSlotPresentSetup(UIViewController *presenter, BOOL force)
 {
-    if(!force && (NXSlotSetupShownThisSession || !NXSlotSetupNeeded()))
+    UINavigationController *navigation = presenter.navigationController;
+    if(navigation == nil || [navigation.topViewController isKindOfClass:NXROMSetupViewController.class])
     {
         return;
     }
-    if(presenter == nil || presenter.presentedViewController != nil)
+    if(!force)
     {
-        return;
+        if(NXSlotSetupShownThisSession || !NXSlotSetupNeeded() || navigation.topViewController != presenter)
+        {
+            return;
+        }
     }
     NXSlotSetupShownThisSession = YES;
 
@@ -1409,10 +1446,7 @@ static void NXSlotPresentSetup(UIViewController *presenter, BOOL force)
     setup.completion = ^{
         NXSlotApplyAppearance(weakPresenter.navigationController);
     };
-    setup.modalPresentationStyle = UIModalPresentationFullScreen;
-    setup.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
-    setup.modalInPresentation = YES;
-    [presenter presentViewController:setup animated:YES completion:nil];
+    [navigation pushViewController:setup animated:force];
 }
 
 #pragma mark - Home
