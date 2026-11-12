@@ -53,9 +53,29 @@
                 <false/>
             </dict>
         </dict>
+        <dict>
+            <key>NXPath</key>
+            <string>Application/Notes.app/Notes</string>
+            <key>NXPermission</key>
+            <integer>365</integer>
+            <key>NXRequiresCodeSigning</key>
+            <true/>
+            <key>NXT2Entitlements</key>
+            <dict>
+                <key>org.emexlabs.nyxian.platform</key>
+                <true/>
+                <key>org.emexlabs.nyxian.platform.user</key>
+                <integer>501</integer>
+                <key>org.emexlabs.nyxian.platform.group</key>
+                <integer>501</integer>
+                <key>org.emexlabs.nyxian.get-task-allow</key>
+                <false/>
+            </dict>
+        </dict>
     </array>
 
     <key>NXRomExecutable</key>
+
     <string>main</string>
 </dict>
 </plist>
