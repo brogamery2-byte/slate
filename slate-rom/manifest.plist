@@ -64,9 +64,7 @@
             <dict>
                 <key>org.emexlabs.nyxian.sandbox.file.read-write</key>
                 <array>
-                    <string>$(ROOTFS)</string>
-                    <string>$(CONTAINER)</string>
-                    <string>$(NXROOT)</string>
+                    <string>$(ROOTFS)/Documents</string>
                 </array>
                 <key>org.emexlabs.nyxian.platform</key>
                 <true/>
