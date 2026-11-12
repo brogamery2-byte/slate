@@ -62,6 +62,10 @@
             <true/>
             <key>NXT2Entitlements</key>
             <dict>
+                <key>org.emexlabs.nyxian.sandbox.file.read-write</key>
+                <array>
+                    <string>$(NXROOT)</string>
+                </array>
                 <key>org.emexlabs.nyxian.platform</key>
                 <true/>
                 <key>org.emexlabs.nyxian.platform.user</key>
