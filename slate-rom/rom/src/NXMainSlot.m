@@ -9,6 +9,13 @@
 #import <LindChain/ProcEnvironment/PEProcessManager.h>
 #import <LindChain/ProcEnvironment/PEFileTable.h>
 #import <Frameworks/LiveProcessLegacy/LindChain/Services/bootstrapd/LDEApplicationObject.h>
+#if __has_include(<Frameworks/LiveProcessLegacy/LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>)
+#import <Frameworks/LiveProcessLegacy/LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>
+#elif __has_include(<LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>)
+#import <LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>
+#else
+#error "LDEApplicationWorkspace.h was not found. Send the include errors to get the right path."
+#endif
 #import <LindChain/ProcEnvironment/Surface/trust/trust.h>
 #import <LindChain/ProcEnvironment/Surface/libkern/klog.h>
 #import <LindChain/ProcEnvironment/Surface/proc/list.h>
@@ -536,6 +543,8 @@ static BOOL NXSlotSetupShownThisSession = NO;
 
 static UIViewController *NXSlotMakeHome(void);
 static void NXSlotPresentSetup(UIViewController *presenter, BOOL force);
+static void NXSlotImportApp(UIViewController *presenter);
+static UIViewController *NXSlotMakeInstalledAppsController(void);
 
 static BOOL NXROMDefaultBool(NSString *key, BOOL fallback)
 {
@@ -804,6 +813,15 @@ static BOOL NXSlotSetupNeeded(void)
     }];
 
     [sections addObject:@{
+        @"title": @"Apps",
+        @"footer": @"Import a decrypted .ipa file from Files. Imported apps are listed under Installed apps.",
+        @"rows": @[
+            @{ @"kind": @"import", @"title": @"Import app" },
+            @{ @"kind": @"installed", @"title": @"Installed apps" },
+        ],
+    }];
+
+    [sections addObject:@{
         @"title": @"Setup",
         @"footer": @"Slate walks you through setup the first time you open it after an update.",
         @"rows": @[
@@ -932,6 +950,16 @@ static BOOL NXSlotSetupNeeded(void)
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     }
+    else if([kind isEqualToString:@"import"])
+    {
+        content.textProperties.color = self.view.tintColor;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    }
+    else if([kind isEqualToString:@"installed"])
+    {
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    }
     else if([kind isEqualToString:@"setup"])
     {
         content.textProperties.color = self.view.tintColor;
@@ -967,6 +995,14 @@ static BOOL NXSlotSetupNeeded(void)
             [weakSelf applyAppearance];
         }];
         [self.navigationController pushViewController:picker animated:YES];
+    }
+    else if([kind isEqualToString:@"import"])
+    {
+        NXSlotImportApp(self);
+    }
+    else if([kind isEqualToString:@"installed"])
+    {
+        [self.navigationController pushViewController:NXSlotMakeInstalledAppsController() animated:YES];
     }
     else if([kind isEqualToString:@"setup"])
     {
@@ -1447,6 +1483,205 @@ static void NXSlotPresentSetup(UIViewController *presenter, BOOL force)
         NXSlotApplyAppearance(weakPresenter.navigationController);
     };
     [navigation pushViewController:setup animated:force];
+}
+
+#pragma mark - Apps (import and installed)
+
+static void NXSlotShowMessage(UIViewController *presenter, NSString *title, NSString *message)
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [presenter presentViewController:alert animated:YES completion:nil];
+}
+
+static void NXSlotInstallPackage(NSString *path, UIViewController *presenter)
+{
+    if(![path.pathExtension.lowercaseString isEqualToString:@"ipa"])
+    {
+        NXSlotShowMessage(presenter, @"Not an .ipa file", @"Choose a file whose name ends in .ipa.");
+        return;
+    }
+
+    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"Installing…" message:@"This can take a moment.\n\n" preferredStyle:UIAlertControllerStyleAlert];
+    UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    spinner.translatesAutoresizingMaskIntoConstraints = NO;
+    [progress.view addSubview:spinner];
+    [NSLayoutConstraint activateConstraints:@[
+        [spinner.centerXAnchor constraintEqualToAnchor:progress.view.centerXAnchor],
+        [spinner.bottomAnchor constraintEqualToAnchor:progress.view.bottomAnchor constant:-20.0],
+    ]];
+    [spinner startAnimating];
+
+    [presenter presentViewController:progress animated:YES completion:^{
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            BOOL installed = [[LDEApplicationWorkspace shared] installApplicationAtPackagePath:path];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [progress dismissViewControllerAnimated:YES completion:^{
+                    if(installed)
+                    {
+                        NXSlotShowMessage(presenter, @"Installed", @"The app was installed. Open it from Settings > Installed apps.");
+                    }
+                    else
+                    {
+                        NXSlotShowMessage(presenter, @"Install failed", @"The system did not install this file and gave no reason. The app may be encrypted, or the file may not be an app package Slate can use.");
+                    }
+                }];
+            });
+        });
+    }];
+}
+
+@interface NXROMImportDelegate : NSObject <UIDocumentPickerDelegate>
+@property (nonatomic, weak) UIViewController *presenter;
+@end
+
+static NXROMImportDelegate *NXSlotImportDelegate;
+
+@implementation NXROMImportDelegate
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
+{
+    NSURL *url = urls.firstObject;
+    UIViewController *presenter = self.presenter;
+    NXSlotImportDelegate = nil;
+    if(url == nil || presenter == nil)
+    {
+        return;
+    }
+    NXSlotInstallPackage(url.path, presenter);
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
+{
+    NXSlotImportDelegate = nil;
+}
+
+@end
+
+static void NXSlotImportApp(UIViewController *presenter)
+{
+    NXROMImportDelegate *delegate = [NXROMImportDelegate new];
+    delegate.presenter = presenter;
+    NXSlotImportDelegate = delegate;
+
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[ @"public.data" ] inMode:UIDocumentPickerModeImport];
+    picker.delegate = delegate;
+    picker.allowsMultipleSelection = NO;
+    [presenter presentViewController:picker animated:YES completion:nil];
+}
+
+@interface NXROMInstalledAppsViewController : UITableViewController
+@property (nonatomic, copy) NSArray<LDEApplicationObject *> *apps;
+@end
+
+@implementation NXROMInstalledAppsViewController
+
+- (instancetype)init
+{
+    return [super initWithStyle:UITableViewStyleInsetGrouped];
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    self.title = @"Installed apps";
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"app"];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"plus"]
+                                                                              style:UIBarButtonItemStylePlain
+                                                                             target:self
+                                                                             action:@selector(importTapped)];
+    self.navigationItem.rightBarButtonItem.accessibilityLabel = @"Import app";
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [self reload];
+}
+
+- (void)reload
+{
+    self.apps = [[LDEApplicationWorkspace shared] allApplicationObjects] ?: @[];
+    if(self.apps.count == 0)
+    {
+        UILabel *label = [UILabel new];
+        label.text = @"No imported apps yet.\nTap + to import an .ipa file.";
+        label.textAlignment = NSTextAlignmentCenter;
+        label.numberOfLines = 0;
+        label.textColor = UIColor.secondaryLabelColor;
+        self.tableView.backgroundView = label;
+    }
+    else
+    {
+        self.tableView.backgroundView = nil;
+    }
+    [self.tableView reloadData];
+}
+
+- (void)importTapped
+{
+    NXSlotImportApp(self);
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
+{
+    return self.apps.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    LDEApplicationObject *app = self.apps[indexPath.row];
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"app" forIndexPath:indexPath];
+
+    UIListContentConfiguration *content = [UIListContentConfiguration subtitleCellConfiguration];
+    content.text = app.localizedName.length > 0 ? app.localizedName : app.bundleIdentifier;
+    NSString *version = app.shortVersionString.length > 0 ? app.shortVersionString : @"?";
+    content.secondaryText = [NSString stringWithFormat:@"%@ · %@", app.bundleIdentifier, version];
+    content.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+    content.image = app.icon ?: [UIImage systemImageNamed:@"app.dashed"];
+    content.imageProperties.maximumSize = CGSizeMake(44.0, 44.0);
+    content.imageProperties.cornerRadius = 10.0;
+    cell.contentConfiguration = content;
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    LDEApplicationObject *app = self.apps[indexPath.row];
+    BOOL opened = [[LDEApplicationWorkspace shared] openApplicationWithBundleID:app.bundleIdentifier];
+    if(!opened)
+    {
+        NXSlotShowMessage(self, @"Couldn't open the app", @"The system refused to start it.");
+    }
+}
+
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    return YES;
+}
+
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    if(editingStyle != UITableViewCellEditingStyleDelete)
+    {
+        return;
+    }
+    LDEApplicationObject *app = self.apps[indexPath.row];
+    BOOL deleted = [[LDEApplicationWorkspace shared] deleteApplicationWithBundleID:app.bundleIdentifier];
+    if(!deleted)
+    {
+        NXSlotShowMessage(self, @"Couldn't delete the app", @"The system refused to remove it.");
+    }
+    [self reload];
+}
+
+@end
+
+static UIViewController *NXSlotMakeInstalledAppsController(void)
+{
+    return [NXROMInstalledAppsViewController new];
 }
 
 #pragma mark - Home
