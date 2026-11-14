@@ -1975,18 +1975,39 @@ static NSString *NXSlotAppDetails(LDEApplicationObject *app)
             (unsigned long)app.entitlements.count];
 }
 
+/* The installer can drop the "runnable" permission of the main executable. Put it back and report why that failed, or nil on success. */
+static NSString *NXSlotRepairExecutable(LDEApplicationObject *app)
+{
+    NSString *path = app.executablePath;
+    NSFileManager *manager = NSFileManager.defaultManager;
+    if(path.length == 0 || ![manager fileExistsAtPath:path])
+    {
+        return @"The app's executable file is missing.";
+    }
+    if([manager isExecutableFileAtPath:path])
+    {
+        return nil;
+    }
+    NSError *error = nil;
+    if(![manager setAttributes:@{ NSFilePosixPermissions: @(0755) } ofItemAtPath:path error:&error])
+    {
+        return [NSString stringWithFormat:@"The executable is not marked runnable and Slate could not fix it: %@", error.localizedDescription];
+    }
+    if(![manager isExecutableFileAtPath:path])
+    {
+        return @"The executable is still not runnable after fixing its permissions.";
+    }
+    return nil;
+}
+
 /* Starts an installed app the same way the ROM starts its own apps and returns why it failed, or nil on success. */
 static NSString *NXSlotLaunchInstalled(LDEApplicationObject *app)
 {
     NSString *executablePath = app.executablePath;
-    NSFileManager *manager = NSFileManager.defaultManager;
-    if(executablePath.length == 0 || ![manager fileExistsAtPath:executablePath])
+    NSString *repairProblem = NXSlotRepairExecutable(app);
+    if(repairProblem != nil)
     {
-        return @"The app's executable file is missing.";
-    }
-    if(![manager isExecutableFileAtPath:executablePath])
-    {
-        return @"The app's executable file is not marked as runnable.";
+        return repairProblem;
     }
     if(!app.isLaunchAllowed)
     {
@@ -2139,6 +2160,7 @@ static NSString *NXSlotLaunchInstalled(LDEApplicationObject *app)
 
     [self presentViewController:progress animated:YES completion:^{
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            NXSlotRepairExecutable(app);
             BOOL opened = [[LDEApplicationWorkspace shared] openApplicationWithBundleID:bundleIdentifier];
             NSString *reason = nil;
             if(!opened)
