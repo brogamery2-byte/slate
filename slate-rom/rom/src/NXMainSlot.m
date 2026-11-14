@@ -1960,6 +1960,67 @@ static void NXSlotImportApp(UIViewController *presenter)
     [presenter presentViewController:picker animated:YES completion:nil];
 }
 
+static NSString *NXSlotAppDetails(LDEApplicationObject *app)
+{
+    NSFileManager *manager = NSFileManager.defaultManager;
+    NSString *executable = app.executablePath;
+    BOOL exists = executable.length > 0 && [manager fileExistsAtPath:executable];
+    BOOL runnable = exists && [manager isExecutableFileAtPath:executable];
+    return [NSString stringWithFormat:@"Bundle ID: %@\nExecutable: %@\nFile found: %@, runnable: %@\nLaunch allowed: %@\nPermissions given: %lu",
+            app.bundleIdentifier ?: @"?",
+            executable ?: @"(none)",
+            exists ? @"yes" : @"no",
+            runnable ? @"yes" : @"no",
+            app.isLaunchAllowed ? @"yes" : @"no",
+            (unsigned long)app.entitlements.count];
+}
+
+/* Starts an installed app the same way the ROM starts its own apps and returns why it failed, or nil on success. */
+static NSString *NXSlotLaunchInstalled(LDEApplicationObject *app)
+{
+    NSString *executablePath = app.executablePath;
+    NSFileManager *manager = NSFileManager.defaultManager;
+    if(executablePath.length == 0 || ![manager fileExistsAtPath:executablePath])
+    {
+        return @"The app's executable file is missing.";
+    }
+    if(![manager isExecutableFileAtPath:executablePath])
+    {
+        return @"The app's executable file is not marked as runnable.";
+    }
+    if(!app.isLaunchAllowed)
+    {
+        return @"The system marked this app as not allowed to launch.";
+    }
+
+    PEFileTable *table = [PEFileTable emptyTable];
+    [table appendFileDescriptor:STDOUT_FILENO withMappingToLoc:STDOUT_FILENO];
+    [table appendFileDescriptor:STDERR_FILENO withMappingToLoc:STDERR_FILENO];
+
+    errno = 0;
+    pid_t pid = [[PEProcessManager shared] spawnProcessWithItems:@{
+        @"PEExecutablePath": executablePath,
+        @"PEArguments": @[ executablePath ],
+        @"PEWorkingDirectory": NXBootstrap.shared.rootfsURL.path,
+        @"PEEnvironment": @{},
+        @"PEFileTable": table,
+    } withKernelSurfaceProcess:NULL];
+    if(pid < 0)
+    {
+        int error = errno;
+        return [NSString stringWithFormat:@"Starting the process failed: %s", error ? strerror(error) : "the system rejected it"];
+    }
+
+    PEProcess *process = [[PEProcessManager shared] processForProcessIdentifier:pid];
+    if(process != nil && process.bundleIdentifier == nil)
+    {
+        process.applicationObject = app;
+        process.bundleIdentifier = app.bundleIdentifier;
+        process.displayName = app.localizedName;
+    }
+    return nil;
+}
+
 @interface NXROMInstalledAppsViewController : UITableViewController
 @property (nonatomic, copy) NSArray<LDEApplicationObject *> *apps;
 @end
@@ -2066,6 +2127,10 @@ static void NXSlotImportApp(UIViewController *presenter)
 {
     NSString *bundleIdentifier = app.bundleIdentifier;
     NSString *name = app.localizedName.length > 0 ? app.localizedName : bundleIdentifier;
+    if(NXROMActivateWindow(bundleIdentifier))
+    {
+        return;
+    }
 
     UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"Opening…" message:name preferredStyle:UIAlertControllerStyleAlert];
     [progress addAction:[UIAlertAction actionWithTitle:@"Hide" style:UIAlertActionStyleCancel handler:nil]];
@@ -2075,12 +2140,19 @@ static void NXSlotImportApp(UIViewController *presenter)
     [self presentViewController:progress animated:YES completion:^{
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             BOOL opened = [[LDEApplicationWorkspace shared] openApplicationWithBundleID:bundleIdentifier];
+            NSString *reason = nil;
+            if(!opened)
+            {
+                reason = NXSlotLaunchInstalled(app);
+                opened = (reason == nil);
+            }
             dispatch_async(dispatch_get_main_queue(), ^{
                 finished = YES;
                 [progress dismissViewControllerAnimated:YES completion:^{
                     if(!opened && weakSelf != nil)
                     {
-                        NXSlotShowMessage(weakSelf, @"Couldn't open the app", @"The system refused to start it.");
+                        NSString *text = [NSString stringWithFormat:@"%@\n\n%@", reason ?: @"The system refused to start it.", NXSlotAppDetails(app)];
+                        NXSlotShowMessage(weakSelf, @"Couldn't open the app", text);
                     }
                 }];
             });
