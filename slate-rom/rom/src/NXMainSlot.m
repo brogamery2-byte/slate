@@ -1990,23 +1990,43 @@ static void NXSlotImportApp(UIViewController *presenter)
     [self reload];
 }
 
+- (UILabel *)messageLabel:(NSString *)text
+{
+    UILabel *label = [UILabel new];
+    label.text = text;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.numberOfLines = 0;
+    label.textColor = UIColor.secondaryLabelColor;
+    return label;
+}
+
 - (void)reload
 {
-    self.apps = [[LDEApplicationWorkspace shared] allApplicationObjects] ?: @[];
     if(self.apps.count == 0)
     {
-        UILabel *label = [UILabel new];
-        label.text = @"No imported apps yet.\nTap + to import an .ipa file.";
-        label.textAlignment = NSTextAlignmentCenter;
-        label.numberOfLines = 0;
-        label.textColor = UIColor.secondaryLabelColor;
-        self.tableView.backgroundView = label;
+        self.tableView.backgroundView = [self messageLabel:@"Loading…"];
     }
-    else
-    {
-        self.tableView.backgroundView = nil;
-    }
-    [self.tableView reloadData];
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSArray<LDEApplicationObject *> *apps = [[LDEApplicationWorkspace shared] allApplicationObjects] ?: @[];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NXROMInstalledAppsViewController *strongSelf = weakSelf;
+            if(strongSelf == nil)
+            {
+                return;
+            }
+            strongSelf.apps = apps;
+            if(apps.count == 0)
+            {
+                strongSelf.tableView.backgroundView = [strongSelf messageLabel:@"No imported apps yet.\nTap + to import an .ipa file."];
+            }
+            else
+            {
+                strongSelf.tableView.backgroundView = nil;
+            }
+            [strongSelf.tableView reloadData];
+        });
+    });
 }
 
 - (void)importTapped
@@ -2039,12 +2059,40 @@ static void NXSlotImportApp(UIViewController *presenter)
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    LDEApplicationObject *app = self.apps[indexPath.row];
-    BOOL opened = [[LDEApplicationWorkspace shared] openApplicationWithBundleID:app.bundleIdentifier];
-    if(!opened)
-    {
-        NXSlotShowMessage(self, @"Couldn't open the app", @"The system refused to start it.");
-    }
+    [self openApp:self.apps[indexPath.row]];
+}
+
+- (void)openApp:(LDEApplicationObject *)app
+{
+    NSString *bundleIdentifier = app.bundleIdentifier;
+    NSString *name = app.localizedName.length > 0 ? app.localizedName : bundleIdentifier;
+
+    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"Opening…" message:name preferredStyle:UIAlertControllerStyleAlert];
+    [progress addAction:[UIAlertAction actionWithTitle:@"Hide" style:UIAlertActionStyleCancel handler:nil]];
+    __block BOOL finished = NO;
+    __weak typeof(self) weakSelf = self;
+
+    [self presentViewController:progress animated:YES completion:^{
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            BOOL opened = [[LDEApplicationWorkspace shared] openApplicationWithBundleID:bundleIdentifier];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                finished = YES;
+                [progress dismissViewControllerAnimated:YES completion:^{
+                    if(!opened && weakSelf != nil)
+                    {
+                        NXSlotShowMessage(weakSelf, @"Couldn't open the app", @"The system refused to start it.");
+                    }
+                }];
+            });
+        });
+    }];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if(!finished && progress.presentingViewController != nil)
+        {
+            progress.message = [NSString stringWithFormat:@"%@\n\nStill starting. Some apps need features this ROM doesn't have, so this one may never open. You can tap Hide and keep using Slate.", name];
+        }
+    });
 }
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath
@@ -2058,13 +2106,18 @@ static void NXSlotImportApp(UIViewController *presenter)
     {
         return;
     }
-    LDEApplicationObject *app = self.apps[indexPath.row];
-    BOOL deleted = [[LDEApplicationWorkspace shared] deleteApplicationWithBundleID:app.bundleIdentifier];
-    if(!deleted)
-    {
-        NXSlotShowMessage(self, @"Couldn't delete the app", @"The system refused to remove it.");
-    }
-    [self reload];
+    NSString *bundleIdentifier = self.apps[indexPath.row].bundleIdentifier;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        BOOL deleted = [[LDEApplicationWorkspace shared] deleteApplicationWithBundleID:bundleIdentifier];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if(!deleted && weakSelf != nil)
+            {
+                NXSlotShowMessage(weakSelf, @"Couldn't delete the app", @"The system refused to remove it.");
+            }
+            [weakSelf reload];
+        });
+    });
 }
 
 @end
