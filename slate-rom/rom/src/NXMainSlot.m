@@ -1494,6 +1494,401 @@ static void NXSlotShowMessage(UIViewController *presenter, NSString *title, NSSt
     [presenter presentViewController:alert animated:YES completion:nil];
 }
 
+#pragma mark - Reading .ipa files
+
+@interface NXROMZipEntry : NSObject
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic, assign) uint16_t method;
+@property (nonatomic, assign) uint32_t compressedSize;
+@property (nonatomic, assign) uint32_t size;
+@property (nonatomic, assign) uint32_t localOffset;
+@property (nonatomic, assign) uint32_t mode;
+@end
+
+@implementation NXROMZipEntry
+@end
+
+static uint16_t NXSlotRead16(const uint8_t *p)
+{
+    return (uint16_t)(p[0] | (p[1] << 8));
+}
+
+static uint32_t NXSlotRead32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static uint32_t NXSlotRead32BE(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static NSArray<NXROMZipEntry *> *NXSlotZipEntries(NSData *zip, NSString **problem)
+{
+    const uint8_t *bytes = zip.bytes;
+    NSUInteger length = zip.length;
+    if(length < 22 || NXSlotRead32(bytes) != 0x04034b50)
+    {
+        *problem = @"The file is not a zip archive, so it is not an .ipa.";
+        return nil;
+    }
+
+    NSInteger eocd = -1;
+    NSInteger first = (NSInteger)length - 22;
+    NSInteger last = MAX(0, first - 65535);
+    for(NSInteger index = first; index >= last; index--)
+    {
+        if(NXSlotRead32(bytes + index) == 0x06054b50)
+        {
+            eocd = index;
+            break;
+        }
+    }
+    if(eocd < 0)
+    {
+        *problem = @"The zip file is damaged: its table of contents is missing.";
+        return nil;
+    }
+
+    uint16_t count = NXSlotRead16(bytes + eocd + 10);
+    uint32_t directorySize = NXSlotRead32(bytes + eocd + 12);
+    uint32_t directoryOffset = NXSlotRead32(bytes + eocd + 16);
+    if(count == 0xFFFF || directoryOffset == 0xFFFFFFFF)
+    {
+        *problem = @"This archive is larger than 4 GB, which Slate can't read yet.";
+        return nil;
+    }
+    if((uint64_t)directoryOffset + directorySize > length)
+    {
+        *problem = @"The zip file is damaged: its table of contents is out of range.";
+        return nil;
+    }
+
+    NSMutableArray<NXROMZipEntry *> *entries = [NSMutableArray arrayWithCapacity:count];
+    NSUInteger offset = directoryOffset;
+    for(uint16_t index = 0; index < count; index++)
+    {
+        if(offset + 46 > length || NXSlotRead32(bytes + offset) != 0x02014b50)
+        {
+            *problem = @"The zip file is damaged: an entry is unreadable.";
+            return nil;
+        }
+        uint16_t nameLength = NXSlotRead16(bytes + offset + 28);
+        uint16_t extraLength = NXSlotRead16(bytes + offset + 30);
+        uint16_t commentLength = NXSlotRead16(bytes + offset + 32);
+        if(offset + 46 + nameLength > length)
+        {
+            *problem = @"The zip file is damaged: a file name is out of range.";
+            return nil;
+        }
+
+        NXROMZipEntry *entry = [NXROMZipEntry new];
+        entry.method = NXSlotRead16(bytes + offset + 10);
+        entry.compressedSize = NXSlotRead32(bytes + offset + 20);
+        entry.size = NXSlotRead32(bytes + offset + 24);
+        entry.mode = NXSlotRead32(bytes + offset + 38) >> 16;
+        entry.localOffset = NXSlotRead32(bytes + offset + 42);
+        entry.name = [[NSString alloc] initWithBytes:bytes + offset + 46 length:nameLength encoding:NSUTF8StringEncoding] ?: @"";
+        [entries addObject:entry];
+
+        offset += 46 + nameLength + extraLength + commentLength;
+    }
+    return entries;
+}
+
+static NSData *NXSlotZipData(NSData *zip, NXROMZipEntry *entry)
+{
+    const uint8_t *bytes = zip.bytes;
+    NSUInteger length = zip.length;
+    NSUInteger local = entry.localOffset;
+    if(local + 30 > length || NXSlotRead32(bytes + local) != 0x04034b50)
+    {
+        return nil;
+    }
+    uint16_t nameLength = NXSlotRead16(bytes + local + 26);
+    uint16_t extraLength = NXSlotRead16(bytes + local + 28);
+    NSUInteger start = local + 30 + nameLength + extraLength;
+    if(start + entry.compressedSize > length)
+    {
+        return nil;
+    }
+
+    NSData *raw = [NSData dataWithBytes:bytes + start length:entry.compressedSize];
+    if(entry.method == 0)
+    {
+        return raw;
+    }
+    if(entry.method == 8)
+    {
+        return [raw decompressedDataUsingAlgorithm:NSDataCompressionAlgorithmZlib error:nil];
+    }
+    return nil;
+}
+
+static BOOL NXSlotMachOInfo(NSData *binary, BOOL *encrypted, BOOL *signedBinary, NSString **architecture)
+{
+    const uint8_t *bytes = binary.bytes;
+    NSUInteger length = binary.length;
+    NSUInteger base = 0;
+    if(length < 32)
+    {
+        return NO;
+    }
+
+    if(NXSlotRead32BE(bytes) == 0xCAFEBABE)
+    {
+        uint32_t count = NXSlotRead32BE(bytes + 4);
+        BOOL found = NO;
+        for(uint32_t index = 0; index < count && 8 + (NSUInteger)(index + 1) * 20 <= length; index++)
+        {
+            const uint8_t *arch = bytes + 8 + index * 20;
+            if(NXSlotRead32BE(arch) == 0x0100000C)
+            {
+                base = NXSlotRead32BE(arch + 8);
+                found = YES;
+                break;
+            }
+        }
+        if(!found || base + 32 > length)
+        {
+            *architecture = @"no arm64 version";
+            return NO;
+        }
+    }
+
+    if(NXSlotRead32(bytes + base) != 0xFEEDFACF)
+    {
+        *architecture = @"not a 64-bit Mach-O file";
+        return NO;
+    }
+    *architecture = (NXSlotRead32(bytes + base + 4) == 0x0100000C) ? @"arm64" : @"other CPU";
+
+    uint32_t commandCount = NXSlotRead32(bytes + base + 16);
+    NSUInteger position = base + 32;
+    *encrypted = NO;
+    *signedBinary = NO;
+    for(uint32_t index = 0; index < commandCount; index++)
+    {
+        if(position + 8 > length)
+        {
+            break;
+        }
+        uint32_t command = NXSlotRead32(bytes + position);
+        uint32_t size = NXSlotRead32(bytes + position + 4);
+        if(size < 8)
+        {
+            break;
+        }
+        if(command == 0x2C && position + 20 <= length)
+        {
+            *encrypted = (NXSlotRead32(bytes + position + 16) != 0);
+        }
+        if(command == 0x1D)
+        {
+            *signedBinary = YES;
+        }
+        position += size;
+    }
+    return YES;
+}
+
+static NSDictionary *NXSlotInspectIPA(NSData *zip, NSArray<NXROMZipEntry *> *entries, NSString **problem)
+{
+    NXROMZipEntry *plistEntry = nil;
+    for(NXROMZipEntry *entry in entries)
+    {
+        NSArray<NSString *> *parts = [entry.name componentsSeparatedByString:@"/"];
+        if(parts.count == 3 && [parts[0] isEqualToString:@"Payload"] && [parts[1] hasSuffix:@".app"] && [parts[2] isEqualToString:@"Info.plist"])
+        {
+            plistEntry = entry;
+            break;
+        }
+    }
+    if(plistEntry == nil)
+    {
+        *problem = @"There is no Payload/<name>.app folder with an Info.plist inside, so this is not an iOS app package.";
+        return nil;
+    }
+
+    NSData *plistData = NXSlotZipData(zip, plistEntry);
+    id plist = plistData ? [NSPropertyListSerialization propertyListWithData:plistData options:NSPropertyListImmutable format:nil error:nil] : nil;
+    if(![plist isKindOfClass:NSDictionary.class])
+    {
+        *problem = @"The app's Info.plist could not be read.";
+        return nil;
+    }
+    NSDictionary *info = plist;
+
+    NSString *appFolder = [plistEntry.name stringByDeletingLastPathComponent];
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"appFolder"] = appFolder;
+    result[@"bundleID"] = info[@"CFBundleIdentifier"] ?: @"(no bundle ID)";
+    result[@"name"] = info[@"CFBundleDisplayName"] ?: info[@"CFBundleName"] ?: appFolder.lastPathComponent;
+    result[@"version"] = info[@"CFBundleShortVersionString"] ?: @"?";
+    result[@"minOS"] = info[@"MinimumOSVersion"] ?: @"?";
+
+    NSString *executable = info[@"CFBundleExecutable"];
+    if([executable isKindOfClass:NSString.class] && executable.length > 0)
+    {
+        NSString *executableName = [appFolder stringByAppendingPathComponent:executable];
+        for(NXROMZipEntry *entry in entries)
+        {
+            if([entry.name isEqualToString:executableName])
+            {
+                if(entry.size > 200u * 1024u * 1024u)
+                {
+                    result[@"architecture"] = @"too large to check";
+                    break;
+                }
+                NSData *binary = NXSlotZipData(zip, entry);
+                BOOL encrypted = NO;
+                BOOL signedBinary = NO;
+                NSString *architecture = nil;
+                if(binary != nil && NXSlotMachOInfo(binary, &encrypted, &signedBinary, &architecture))
+                {
+                    result[@"encrypted"] = @(encrypted);
+                    result[@"signed"] = @(signedBinary);
+                }
+                if(architecture != nil)
+                {
+                    result[@"architecture"] = architecture;
+                }
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+static NSString *NXSlotSummary(NSDictionary *info)
+{
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    [lines addObject:[NSString stringWithFormat:@"%@ (%@)", info[@"name"], info[@"bundleID"]]];
+    [lines addObject:[NSString stringWithFormat:@"Version %@, needs iOS %@ or newer", info[@"version"], info[@"minOS"]]];
+    if(info[@"architecture"] != nil)
+    {
+        [lines addObject:[NSString stringWithFormat:@"Binary: %@", info[@"architecture"]]];
+    }
+    if(info[@"encrypted"] != nil)
+    {
+        [lines addObject:[NSString stringWithFormat:@"Encrypted: %@", [info[@"encrypted"] boolValue] ? @"yes" : @"no"]];
+    }
+    if(info[@"signed"] != nil)
+    {
+        [lines addObject:[NSString stringWithFormat:@"Code signature: %@", [info[@"signed"] boolValue] ? @"present" : @"missing"]];
+    }
+    return [lines componentsJoinedByString:@"\n"];
+}
+
+static NSString *NXSlotExtractApp(NSData *zip, NSArray<NXROMZipEntry *> *entries, NSString *appFolder, NSString **problem)
+{
+    NSFileManager *manager = NSFileManager.defaultManager;
+    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:[@"SlateImport-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+    NSString *prefix = [appFolder stringByAppendingString:@"/"];
+
+    for(NXROMZipEntry *entry in entries)
+    {
+        if(![entry.name hasPrefix:prefix] || [entry.name containsString:@".."] || [entry.name hasPrefix:@"/"])
+        {
+            continue;
+        }
+        NSString *destination = [root stringByAppendingPathComponent:entry.name];
+        if([entry.name hasSuffix:@"/"])
+        {
+            [manager createDirectoryAtPath:destination withIntermediateDirectories:YES attributes:nil error:nil];
+            continue;
+        }
+
+        [manager createDirectoryAtPath:[destination stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+        NSData *data = NXSlotZipData(zip, entry);
+        if(data == nil)
+        {
+            *problem = [NSString stringWithFormat:@"Could not unpack %@.", entry.name.lastPathComponent];
+            [manager removeItemAtPath:root error:nil];
+            return nil;
+        }
+
+        if((entry.mode & 0xF000) == 0xA000)
+        {
+            NSString *target = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            if(target.length > 0)
+            {
+                [manager createSymbolicLinkAtPath:destination withDestinationPath:target error:nil];
+            }
+            continue;
+        }
+
+        NSError *error = nil;
+        if(![data writeToFile:destination options:NSDataWritingAtomic error:&error])
+        {
+            *problem = [NSString stringWithFormat:@"Could not write %@: %@", entry.name.lastPathComponent, error.localizedDescription];
+            [manager removeItemAtPath:root error:nil];
+            return nil;
+        }
+        uint32_t permissions = entry.mode & 0777;
+        if(permissions == 0)
+        {
+            permissions = 0644;
+        }
+        [manager setAttributes:@{ NSFilePosixPermissions: @(permissions) } ofItemAtPath:destination error:nil];
+    }
+    return [root stringByAppendingPathComponent:appFolder];
+}
+
+static void NXSlotRunInstall(NSString *path, NSString **title, NSString **message)
+{
+    NSString *problem = nil;
+    NSData *zip = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
+    NSArray<NXROMZipEntry *> *entries = zip ? NXSlotZipEntries(zip, &problem) : nil;
+    if(entries == nil)
+    {
+        *title = @"Can't read the file";
+        *message = problem ?: @"The file could not be opened.";
+        return;
+    }
+    NSDictionary *info = NXSlotInspectIPA(zip, entries, &problem);
+    if(info == nil)
+    {
+        *title = @"Not an app package";
+        *message = problem ?: @"This file does not look like an iOS app.";
+        return;
+    }
+    NSString *summary = NXSlotSummary(info);
+
+    if([info[@"encrypted"] boolValue])
+    {
+        *title = @"This app is encrypted";
+        *message = [NSString stringWithFormat:@"%@\n\nThe App Store encrypts its apps, and Slate can only run decrypted ones, such as open-source apps or apps you built yourself.", summary];
+        return;
+    }
+
+    LDEApplicationWorkspace *workspace = [LDEApplicationWorkspace shared];
+    if([workspace installApplicationAtPackagePath:path])
+    {
+        *title = @"Installed";
+        *message = [NSString stringWithFormat:@"%@\n\nOpen it from Settings > Installed apps.", summary];
+        return;
+    }
+
+    NSString *extractProblem = nil;
+    NSString *bundlePath = NXSlotExtractApp(zip, entries, info[@"appFolder"], &extractProblem);
+    if(bundlePath != nil)
+    {
+        BOOL installed = [workspace installApplicationAtBundlePath:bundlePath];
+        NSString *root = [[bundlePath stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
+        [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+        if(installed)
+        {
+            *title = @"Installed";
+            *message = [NSString stringWithFormat:@"%@\n\nSlate unpacked the app first. Open it from Settings > Installed apps.", summary];
+            return;
+        }
+    }
+
+    *title = @"Install failed";
+    *message = [NSString stringWithFormat:@"%@\n\nSlate tried the .ipa directly and after unpacking it. The system refused both and gave no reason.%@", summary, extractProblem ? [@"\n\n" stringByAppendingString:extractProblem] : @""];
+}
+
 static void NXSlotInstallPackage(NSString *path, UIViewController *presenter)
 {
     if(![path.pathExtension.lowercaseString isEqualToString:@"ipa"])
@@ -1502,7 +1897,7 @@ static void NXSlotInstallPackage(NSString *path, UIViewController *presenter)
         return;
     }
 
-    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"Installing…" message:@"This can take a moment.\n\n" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"Installing…" message:@"Checking and installing the app.\n\n" preferredStyle:UIAlertControllerStyleAlert];
     UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     spinner.translatesAutoresizingMaskIntoConstraints = NO;
     [progress.view addSubview:spinner];
@@ -1514,17 +1909,12 @@ static void NXSlotInstallPackage(NSString *path, UIViewController *presenter)
 
     [presenter presentViewController:progress animated:YES completion:^{
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            BOOL installed = [[LDEApplicationWorkspace shared] installApplicationAtPackagePath:path];
+            NSString *title = nil;
+            NSString *message = nil;
+            NXSlotRunInstall(path, &title, &message);
             dispatch_async(dispatch_get_main_queue(), ^{
                 [progress dismissViewControllerAnimated:YES completion:^{
-                    if(installed)
-                    {
-                        NXSlotShowMessage(presenter, @"Installed", @"The app was installed. Open it from Settings > Installed apps.");
-                    }
-                    else
-                    {
-                        NXSlotShowMessage(presenter, @"Install failed", @"The system did not install this file and gave no reason. The app may be encrypted, or the file may not be an app package Slate can use.");
-                    }
+                    NXSlotShowMessage(presenter, title ?: @"Install finished", message ?: @"");
                 }];
             });
         });
