@@ -9,6 +9,9 @@
 #import <LindChain/ProcEnvironment/PEProcessManager.h>
 #import <LindChain/ProcEnvironment/PEFileTable.h>
 #import <Frameworks/LiveProcessLegacy/LindChain/Services/bootstrapd/LDEApplicationObject.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #if __has_include(<Frameworks/LiveProcessLegacy/LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>)
 #import <Frameworks/LiveProcessLegacy/LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>
 #elif __has_include(<LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>)
@@ -1962,15 +1965,37 @@ static void NXSlotImportApp(UIViewController *presenter)
 
 static NSString *NXSlotAppDetails(LDEApplicationObject *app)
 {
-    NSFileManager *manager = NSFileManager.defaultManager;
     NSString *executable = app.executablePath;
-    BOOL exists = executable.length > 0 && [manager fileExistsAtPath:executable];
-    BOOL runnable = exists && [manager isExecutableFileAtPath:executable];
-    return [NSString stringWithFormat:@"Bundle ID: %@\nExecutable: %@\nFile found: %@, runnable: %@\nLaunch allowed: %@\nPermissions given: %lu",
+    NSString *fileState = @"no executable path";
+    NSString *accessState = @"not tested";
+    if(executable.length > 0)
+    {
+        const char *path = executable.fileSystemRepresentation;
+        struct stat info;
+        errno = 0;
+        if(stat(path, &info) == 0)
+        {
+            fileState = [NSString stringWithFormat:@"mode %o, owner %d:%d, size %lld", (unsigned)(info.st_mode & 07777), (int)info.st_uid, (int)info.st_gid, (long long)info.st_size];
+        }
+        else
+        {
+            fileState = [NSString stringWithFormat:@"stat failed: %s", strerror(errno)];
+        }
+        errno = 0;
+        if(access(path, X_OK) == 0)
+        {
+            accessState = @"ok";
+        }
+        else
+        {
+            accessState = [NSString stringWithFormat:@"%s", strerror(errno)];
+        }
+    }
+    return [NSString stringWithFormat:@"Bundle ID: %@\nExecutable: %@\nFile: %@\nRunnable test: %@\nLaunch allowed: %@\nPermissions given: %lu",
             app.bundleIdentifier ?: @"?",
             executable ?: @"(none)",
-            exists ? @"yes" : @"no",
-            runnable ? @"yes" : @"no",
+            fileState,
+            accessState,
             app.isLaunchAllowed ? @"yes" : @"no",
             (unsigned long)app.entitlements.count];
 }
@@ -2004,10 +2029,10 @@ static NSString *NXSlotRepairExecutable(LDEApplicationObject *app)
 static NSString *NXSlotLaunchInstalled(LDEApplicationObject *app)
 {
     NSString *executablePath = app.executablePath;
-    NSString *repairProblem = NXSlotRepairExecutable(app);
-    if(repairProblem != nil)
+    NXSlotRepairExecutable(app);
+    if(executablePath.length == 0)
     {
-        return repairProblem;
+        return @"The app has no executable path.";
     }
     if(!app.isLaunchAllowed)
     {
