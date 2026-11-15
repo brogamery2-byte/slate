@@ -2088,7 +2088,7 @@ static NSString *NXSlotPatchExecutable(NSString *path, BOOL *patched)
 }
 #endif
 
-static pid_t NXSlotSpawnInstalled(LDEApplicationObject *app, int *errorOut)
+static pid_t NXSlotSpawnInstalled(LDEApplicationObject *app, NSString *executablePath, int *errorOut)
 {
     PEFileTable *table = [PEFileTable emptyTable];
     [table appendFileDescriptor:STDOUT_FILENO withMappingToLoc:STDOUT_FILENO];
@@ -2096,8 +2096,8 @@ static pid_t NXSlotSpawnInstalled(LDEApplicationObject *app, int *errorOut)
 
     errno = 0;
     pid_t pid = [[PEProcessManager shared] spawnProcessWithItems:@{
-        @"PEExecutablePath": app.executablePath,
-        @"PEArguments": @[ app.executablePath ],
+        @"PEExecutablePath": executablePath,
+        @"PEArguments": @[ executablePath ],
         @"PEWorkingDirectory": NXBootstrap.shared.rootfsURL.path,
         @"PEEnvironment": @{},
         @"PEFileTable": table,
@@ -2120,8 +2120,20 @@ static NSString *NXSlotLaunchInstalled(LDEApplicationObject *app)
     }
 
     int error = 0;
-    pid_t pid = NXSlotSpawnInstalled(app, &error);
+    pid_t pid = NXSlotSpawnInstalled(app, app.executablePath, &error);
     NSMutableString *report = [NSMutableString string];
+
+    if(pid < 0 && error == ENOENT)
+    {
+        NSString *rootfs = NXBootstrap.shared.rootfsURL.path;
+        if(rootfs.length > 0 && [app.executablePath hasPrefix:rootfs])
+        {
+            NSString *insidePath = [app.executablePath substringFromIndex:rootfs.length];
+            [report appendFormat:@"Start 1 failed: %s (full path).\n", strerror(error)];
+            pid = NXSlotSpawnInstalled(app, insidePath, &error);
+            [report appendFormat:@"Start 2 used the path inside the ROM's filesystem: %@\n", insidePath];
+        }
+    }
 
     if(pid < 0 && error == EBADEXEC)
     {
@@ -2135,7 +2147,7 @@ static NSString *NXSlotLaunchInstalled(LDEApplicationObject *app)
             return report;
         }
         [report appendFormat:@"Converted the program to a library (the converter said %@).\n", patched ? @"yes" : @"no"];
-        pid = NXSlotSpawnInstalled(app, &error);
+        pid = NXSlotSpawnInstalled(app, app.executablePath, &error);
 #else
         [report appendString:@"This build has no program converter.\n"];
 #endif
