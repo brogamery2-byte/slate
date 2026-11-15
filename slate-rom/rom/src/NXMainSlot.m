@@ -12,6 +12,15 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if __has_include(<LindChain/ProcEnvironment/LiveContainer/LCMachOUtils.h>)
+#import <LindChain/ProcEnvironment/LiveContainer/LCMachOUtils.h>
+#define NXSLOT_HAS_LCMACHO 1
+#elif __has_include(<Frameworks/LiveProcessLegacy/LindChain/ProcEnvironment/LiveContainer/LCMachOUtils.h>)
+#import <Frameworks/LiveProcessLegacy/LindChain/ProcEnvironment/LiveContainer/LCMachOUtils.h>
+#define NXSLOT_HAS_LCMACHO 1
+#else
+#define NXSLOT_HAS_LCMACHO 0
+#endif
 #if __has_include(<Frameworks/LiveProcessLegacy/LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>)
 #import <Frameworks/LiveProcessLegacy/LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>
 #elif __has_include(<LindChain/Services/bootstrapd/LDEApplicationWorkspace.h>)
@@ -1963,6 +1972,44 @@ static void NXSlotImportApp(UIViewController *presenter)
     [presenter presentViewController:picker animated:YES completion:nil];
 }
 
+static NSString *NXSlotMachOKind(NSString *path)
+{
+    NSData *file = path.length > 0 ? [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil] : nil;
+    if(file.length < 32)
+    {
+        return @"unreadable";
+    }
+    const uint8_t *bytes = file.bytes;
+    NSUInteger base = 0;
+    if(NXSlotRead32BE(bytes) == 0xCAFEBABE)
+    {
+        uint32_t count = NXSlotRead32BE(bytes + 4);
+        BOOL found = NO;
+        for(uint32_t index = 0; index < count && 8 + (NSUInteger)(index + 1) * 20 <= file.length; index++)
+        {
+            const uint8_t *arch = bytes + 8 + index * 20;
+            if(NXSlotRead32BE(arch) == 0x0100000C)
+            {
+                base = NXSlotRead32BE(arch + 8);
+                found = YES;
+                break;
+            }
+        }
+        if(!found || base + 32 > file.length)
+        {
+            return @"universal file without arm64";
+        }
+    }
+    if(NXSlotRead32(bytes + base) != 0xFEEDFACF)
+    {
+        return @"not a 64-bit Mach-O file";
+    }
+    uint32_t fileType = NXSlotRead32(bytes + base + 12);
+    uint32_t subtype = NXSlotRead32(bytes + base + 8) & 0xFFFFFF;
+    NSString *kind = fileType == 2 ? @"program (MH_EXECUTE)" : (fileType == 6 ? @"library (MH_DYLIB)" : [NSString stringWithFormat:@"type %u", fileType]);
+    return [NSString stringWithFormat:@"%@, %@", kind, subtype == 2 ? @"arm64e" : @"arm64"];
+}
+
 static NSString *NXSlotAppDetails(LDEApplicationObject *app)
 {
     NSString *executable = app.executablePath;
@@ -1991,10 +2038,11 @@ static NSString *NXSlotAppDetails(LDEApplicationObject *app)
             accessState = [NSString stringWithFormat:@"%s", strerror(errno)];
         }
     }
-    return [NSString stringWithFormat:@"Bundle ID: %@\nExecutable: %@\nFile: %@\nRunnable test: %@\nLaunch allowed: %@\nPermissions given: %lu",
+    return [NSString stringWithFormat:@"Bundle ID: %@\nExecutable: %@\nFile: %@\nBinary: %@\nRunnable test: %@\nLaunch allowed: %@\nPermissions given: %lu",
             app.bundleIdentifier ?: @"?",
             executable ?: @"(none)",
             fileState,
+            NXSlotMachOKind(executable),
             accessState,
             app.isLaunchAllowed ? @"yes" : @"no",
             (unsigned long)app.entitlements.count];
@@ -2025,12 +2073,44 @@ static NSString *NXSlotRepairExecutable(LDEApplicationObject *app)
     return nil;
 }
 
+#if NXSLOT_HAS_LCMACHO
+/* Turns an ordinary app program into a loadable library, the way LiveContainer-style tools do. Returns an error text or nil. */
+static NSString *NXSlotPatchExecutable(NSString *path, BOOL *patched)
+{
+    LCMachO *machO = LCMapMachO(path.fileSystemRepresentation, false);
+    if(machO == NULL)
+    {
+        return @"Slate could not open the program to convert it.";
+    }
+    *patched = LCPatchExecSlice(machO);
+    LCUnmapMachO(machO);
+    return nil;
+}
+#endif
+
+static pid_t NXSlotSpawnInstalled(LDEApplicationObject *app, int *errorOut)
+{
+    PEFileTable *table = [PEFileTable emptyTable];
+    [table appendFileDescriptor:STDOUT_FILENO withMappingToLoc:STDOUT_FILENO];
+    [table appendFileDescriptor:STDERR_FILENO withMappingToLoc:STDERR_FILENO];
+
+    errno = 0;
+    pid_t pid = [[PEProcessManager shared] spawnProcessWithItems:@{
+        @"PEExecutablePath": app.executablePath,
+        @"PEArguments": @[ app.executablePath ],
+        @"PEWorkingDirectory": NXBootstrap.shared.rootfsURL.path,
+        @"PEEnvironment": @{},
+        @"PEFileTable": table,
+    } withKernelSurfaceProcess:NULL];
+    *errorOut = errno;
+    return pid;
+}
+
 /* Starts an installed app the same way the ROM starts its own apps and returns why it failed, or nil on success. */
 static NSString *NXSlotLaunchInstalled(LDEApplicationObject *app)
 {
-    NSString *executablePath = app.executablePath;
     NXSlotRepairExecutable(app);
-    if(executablePath.length == 0)
+    if(app.executablePath.length == 0)
     {
         return @"The app has no executable path.";
     }
@@ -2039,22 +2119,32 @@ static NSString *NXSlotLaunchInstalled(LDEApplicationObject *app)
         return @"The system marked this app as not allowed to launch.";
     }
 
-    PEFileTable *table = [PEFileTable emptyTable];
-    [table appendFileDescriptor:STDOUT_FILENO withMappingToLoc:STDOUT_FILENO];
-    [table appendFileDescriptor:STDERR_FILENO withMappingToLoc:STDERR_FILENO];
+    int error = 0;
+    pid_t pid = NXSlotSpawnInstalled(app, &error);
+    NSMutableString *report = [NSMutableString string];
 
-    errno = 0;
-    pid_t pid = [[PEProcessManager shared] spawnProcessWithItems:@{
-        @"PEExecutablePath": executablePath,
-        @"PEArguments": @[ executablePath ],
-        @"PEWorkingDirectory": NXBootstrap.shared.rootfsURL.path,
-        @"PEEnvironment": @{},
-        @"PEFileTable": table,
-    } withKernelSurfaceProcess:NULL];
+    if(pid < 0 && error == EBADEXEC)
+    {
+        [report appendFormat:@"Start 1 failed: %s.\n", strerror(error)];
+#if NXSLOT_HAS_LCMACHO
+        BOOL patched = NO;
+        NSString *patchProblem = NXSlotPatchExecutable(app.executablePath, &patched);
+        if(patchProblem != nil)
+        {
+            [report appendString:patchProblem];
+            return report;
+        }
+        [report appendFormat:@"Converted the program to a library (the converter said %@).\n", patched ? @"yes" : @"no"];
+        pid = NXSlotSpawnInstalled(app, &error);
+#else
+        [report appendString:@"This build has no program converter.\n"];
+#endif
+    }
+
     if(pid < 0)
     {
-        int error = errno;
-        return [NSString stringWithFormat:@"Starting the process failed: %s", error ? strerror(error) : "the system rejected it"];
+        [report appendFormat:@"Starting the process failed: %s", error ? strerror(error) : "the system rejected it"];
+        return report;
     }
 
     PEProcess *process = [[PEProcessManager shared] processForProcessIdentifier:pid];
