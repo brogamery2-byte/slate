@@ -70,11 +70,26 @@ jobs:
           python3 slate-rom/RomGen.py info slate-rom/rom.zip || true
           shasum -a 256 slate-rom/rom.zip
 
-      - name: Upload the ROM
+      - name: Make a small test .ipa from the Notes app
+        run: |
+          rm -rf ipa-test
+          mkdir -p ipa-test/Payload
+          cp -R slate-rom/Application/Notes.app ipa-test/Payload/NotesTest.app
+          PLIST=ipa-test/Payload/NotesTest.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier dev.alloycore.slate.notestest" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Notes Test" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName NotesTest" "$PLIST"
+          cd ipa-test
+          zip -qry NotesTest.ipa Payload
+          ls -l NotesTest.ipa
+
+      - name: Upload the ROM and the test .ipa
         uses: actions/upload-artifact@v4
         with:
           name: Slate-Dev-ROM
-          path: slate-rom/rom.zip
+          path: |
+            slate-rom/rom.zip
+            ipa-test/NotesTest.ipa
 
       - name: Remove the key
         if: always()
