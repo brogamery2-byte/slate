@@ -26,6 +26,14 @@ my attempt at building one.
 
 Folders get added as the ROM takes shape. See [ROADMAP.md](ROADMAP.md) and [docs/format.md](docs/format.md).
 
+## Testing
+
+To download the developer version that isn’t in releases. Go to the [Actions build-rom.yml workflow](https://github.com/brogamery2-byte/slate/actions/workflows/build-rom.). And click the desired version. Then go to artifacts and download it.
+
+**caution**: These versions aren’t made for stable usage
+
+Then download the latest Nyxian .ipa file. You can find it in their discord or fluxer server. Then open it put your profile inside the app, then close the app and click on Advanced -> Flash ROM and select the rom.zip file
+
 ## Signing and security
 
 ROMs must be signed with a key registered in emexLabs' TrustStore.
