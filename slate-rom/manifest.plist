@@ -76,9 +76,34 @@
                 <false/>
             </dict>
         </dict>
+        <dict>
+            <key>NXPath</key>
+            <string>Application/Terminal.app/Terminal</string>
+            <key>NXPermission</key>
+            <integer>365</integer>
+            <key>NXRequiresCodeSigning</key>
+            <true/>
+            <key>NXT2Entitlements</key>
+            <dict>
+                <key>org.emexlabs.nyxian.platform</key>
+                <true/>
+                <key>org.emexlabs.nyxian.platform.user</key>
+                <integer>501</integer>
+                <key>org.emexlabs.nyxian.platform.group</key>
+                <integer>501</integer>
+                <key>org.emexlabs.nyxian.get-task-allow</key>
+                <false/>
+                <key>org.emexlabs.nyxian.sandbox.file.read-write</key>
+                <array>
+                    <string>$(ROOTFS)</string>
+                    <string>$(CONTAINER)</string>
+                </array>
+            </dict>
+        </dict>
     </array>
 
     <key>NXRomExecutable</key>
+
 
 
     <string>main</string>
