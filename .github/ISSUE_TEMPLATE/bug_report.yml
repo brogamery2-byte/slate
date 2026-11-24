@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in Slate is broken
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open Settings\n2. Tap ...\n3. ..."
+  - type: input
+    id: slate
+    attributes:
+      label: Slate version
+      description: Settings > About shows the version and security version.
+  - type: input
+    id: device
+    attributes:
+      label: Nyxian version, iOS version and device
+  - type: dropdown
+    id: severity
+    attributes:
+      label: How bad is it?
+      options:
+        - Annoying
+        - Blocks something I need
+        - Extreme (data loss, crash on every launch, security)
