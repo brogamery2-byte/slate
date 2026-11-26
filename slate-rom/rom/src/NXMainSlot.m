@@ -11,6 +11,7 @@
 #import <Frameworks/LiveProcessLegacy/LindChain/Services/bootstrapd/LDEApplicationObject.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 #if __has_include(<LindChain/ProcEnvironment/LiveContainer/LCMachOUtils.h>)
 #import <LindChain/ProcEnvironment/LiveContainer/LCMachOUtils.h>
@@ -557,6 +558,7 @@ static UIViewController *NXSlotMakeHome(void);
 static void NXSlotPresentSetup(UIViewController *presenter, BOOL force);
 static void NXSlotImportApp(UIViewController *presenter);
 static UIViewController *NXSlotMakeInstalledAppsController(void);
+static void NXSlotReport(UIViewController *presenter, NSString *kind);
 
 static BOOL NXROMDefaultBool(NSString *key, BOOL fallback)
 {
@@ -856,6 +858,16 @@ static BOOL NXSlotSetupNeeded(void)
     }];
 
     [sections addObject:@{
+        @"title": @"Help",
+        @"footer": @"Opens GitHub with your Slate, Nyxian and iOS versions filled in. Nothing is sent until you tap Submit there.",
+        @"rows": @[
+            @{ @"kind": @"reportbug", @"title": @"Report a problem" },
+            @{ @"kind": @"reportidea", @"title": @"Suggest a feature" },
+            @{ @"kind": @"copyinfo", @"title": @"Copy debug info" },
+        ],
+    }];
+
+    [sections addObject:@{
         @"title": @"",
         @"footer": @"",
         @"rows": @[ @{ @"kind": @"button", @"title": @"Reset Slate settings" } ],
@@ -962,7 +974,7 @@ static BOOL NXSlotSetupNeeded(void)
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     }
-    else if([kind isEqualToString:@"import"])
+    else if([kind isEqualToString:@"import"] || [kind isEqualToString:@"reportbug"] || [kind isEqualToString:@"reportidea"] || [kind isEqualToString:@"copyinfo"])
     {
         content.textProperties.color = self.view.tintColor;
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
@@ -1015,6 +1027,18 @@ static BOOL NXSlotSetupNeeded(void)
     else if([kind isEqualToString:@"installed"])
     {
         [self.navigationController pushViewController:NXSlotMakeInstalledAppsController() animated:YES];
+    }
+    else if([kind isEqualToString:@"reportbug"])
+    {
+        NXSlotReport(self, @"bug");
+    }
+    else if([kind isEqualToString:@"reportidea"])
+    {
+        NXSlotReport(self, @"idea");
+    }
+    else if([kind isEqualToString:@"copyinfo"])
+    {
+        NXSlotReport(self, @"info");
     }
     else if([kind isEqualToString:@"setup"])
     {
@@ -1504,6 +1528,92 @@ static void NXSlotShowMessage(UIViewController *presenter, NSString *title, NSSt
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
     [presenter presentViewController:alert animated:YES completion:nil];
+}
+
+#pragma mark - Report a problem
+
+static NSString *const NXSlotRepoURL = @"https://github.com/brogamery2-byte/slate";
+
+static NSString *NXSlotDeviceModel(void)
+{
+    size_t size = 0;
+    sysctlbyname("hw.machine", NULL, &size, NULL, 0);
+    if(size == 0)
+    {
+        return @"unknown";
+    }
+    char *buffer = malloc(size);
+    NSString *model = nil;
+    if(sysctlbyname("hw.machine", buffer, &size, NULL, 0) == 0)
+    {
+        model = [NSString stringWithUTF8String:buffer];
+    }
+    free(buffer);
+    return model ?: @"unknown";
+}
+
+static NSString *NXSlotDebugInfo(void)
+{
+    NSDictionary *host = NSBundle.mainBundle.infoDictionary;
+    return [NSString stringWithFormat:@"Slate: %@ %@ (security %@)\nROM identifier: %@\nNeeds Nyxian: %@ or newer\nNyxian app: %@ (build %@)\niOS: %@\nDevice: %@",
+            NXROMManifestString(@"NXRomName", @"Slate"),
+            NXROMManifestString(@"NXRomVersion", @"?"),
+            NXROMManifestString(@"NXRomSecurityVersion", @"?"),
+            NXROMManifestString(@"NXRomIdentifier", @"?"),
+            NXROMManifestString(@"NXRomMinimumNyxianVersion", @"?"),
+            host[@"CFBundleShortVersionString"] ?: @"?",
+            host[@"CFBundleVersion"] ?: @"?",
+            UIDevice.currentDevice.systemVersion,
+            NXSlotDeviceModel()];
+}
+
+static NSString *NXSlotURLEncode(NSString *text)
+{
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"];
+    return [text stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
+}
+
+/* kind is "bug", "idea" or "info". The first two open a GitHub issue that is already filled in. */
+static void NXSlotReport(UIViewController *presenter, NSString *kind)
+{
+    NSString *info = NXSlotDebugInfo();
+    if([kind isEqualToString:@"info"])
+    {
+        UIPasteboard.generalPasteboard.string = info;
+        NXSlotShowMessage(presenter, @"Copied", [NSString stringWithFormat:@"This is now on your clipboard:\n\n%@", info]);
+        return;
+    }
+
+    BOOL bug = [kind isEqualToString:@"bug"];
+    NSString *body = bug
+        ? [NSString stringWithFormat:@"## What happened?\n\n\n## Steps to reproduce\n1. \n\n## Versions (filled in by Slate)\n%@\n", info]
+        : [NSString stringWithFormat:@"## The idea\n\n\n## Why would it help?\n\n\n## Versions (filled in by Slate)\n%@\n", info];
+    NSString *address = [NSString stringWithFormat:@"%@/issues/new?title=%@&labels=%@&body=%@",
+                         NXSlotRepoURL,
+                         NXSlotURLEncode(bug ? @"Bug: " : @"Idea: "),
+                         bug ? @"bug" : @"enhancement",
+                         NXSlotURLEncode(body)];
+    NSURL *url = [NSURL URLWithString:address];
+    __weak UIViewController *weakPresenter = presenter;
+    void (^fallback)(void) = ^{
+        UIPasteboard.generalPasteboard.string = info;
+        UIViewController *strongPresenter = weakPresenter;
+        if(strongPresenter != nil)
+        {
+            NXSlotShowMessage(strongPresenter, @"Couldn't open GitHub", [NSString stringWithFormat:@"Your version info was copied. Go to\n%@/issues/new\nand paste it into a new issue.", NXSlotRepoURL]);
+        }
+    };
+    if(url == nil)
+    {
+        fallback();
+        return;
+    }
+    [UIApplication.sharedApplication openURL:url options:@{} completionHandler:^(BOOL success) {
+        if(!success)
+        {
+            dispatch_async(dispatch_get_main_queue(), fallback);
+        }
+    }];
 }
 
 #pragma mark - Reading .ipa files
